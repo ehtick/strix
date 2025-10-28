@@ -7,9 +7,19 @@ import signal
 import sys
 import threading
 from collections.abc import Callable
-from typing import Any, ClassVar, cast
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as pkg_version
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
+
+if TYPE_CHECKING:
+    from textual.timer import Timer
+
+from rich.align import Align
+from rich.console import Group
 from rich.markup import escape as rich_escape
+from rich.panel import Panel
+from rich.style import Style
 from rich.text import Text
 from textual import events, on
 from textual.app import App, ComposeResult
@@ -27,6 +37,13 @@ from strix.llm.config import LLMConfig
 
 def escape_markup(text: str) -> str:
     return cast("str", rich_escape(text))
+
+
+def get_package_version() -> str:
+    try:
+        return pkg_version("strix-agent")
+    except PackageNotFoundError:
+        return "dev"
 
 
 class ChatTextArea(TextArea):  # type: ignore[misc]
@@ -53,24 +70,85 @@ class ChatTextArea(TextArea):  # type: ignore[misc]
 
 
 class SplashScreen(Static):  # type: ignore[misc]
+    PRIMARY_GREEN = "#22c55e"
+    BANNER = (
+        " ███████╗████████╗██████╗ ██╗██╗  ██╗\n"
+        " ██╔════╝╚══██╔══╝██╔══██╗██║╚██╗██╔╝\n"
+        " ███████╗   ██║   ██████╔╝██║ ╚███╔╝\n"
+        " ╚════██║   ██║   ██╔══██╗██║ ██╔██╗\n"
+        " ███████║   ██║   ██║  ██║██║██╔╝ ██╗\n"
+        " ╚══════╝   ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝"
+    )
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._animation_step = 0
+        self._animation_timer: Timer | None = None
+        self._panel_static: Static | None = None
+        self._version = "dev"
+
     def compose(self) -> ComposeResult:
-        ascii_art = r"""
-[bright_green]
+        self._version = get_package_version()
+        self._animation_step = 0
+        start_line = self._build_start_line_text(self._animation_step)
+        panel = self._build_panel(start_line)
 
+        panel_static = Static(panel, id="splash_content")
+        self._panel_static = panel_static
+        yield panel_static
 
-    ███████╗████████╗██████╗ ██╗██╗  ██╗
-    ██╔════╝╚══██╔══╝██╔══██╗██║╚██╗██╔╝
-    ███████╗   ██║   ██████╔╝██║ ╚███╔╝
-    ╚════██║   ██║   ██╔══██╗██║ ██╔██╗
-    ███████║   ██║   ██║  ██║██║██╔╝ ██╗
-    ╚══════╝   ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝
+    def on_mount(self) -> None:
+        self._animation_timer = self.set_interval(0.45, self._animate_start_line)
 
+    def on_unmount(self) -> None:
+        if self._animation_timer is not None:
+            self._animation_timer.stop()
+            self._animation_timer = None
 
-[/bright_green]
+    def _animate_start_line(self) -> None:
+        if not self._panel_static:
+            return
 
-         [bright_green]Starting Strix Cybersecurity Agent...[/bright_green]
-"""
-        yield Static(ascii_art, id="splash_content")
+        self._animation_step += 1
+        start_line = self._build_start_line_text(self._animation_step)
+        panel = self._build_panel(start_line)
+        self._panel_static.update(panel)
+
+    def _build_panel(self, start_line: Text) -> Panel:
+        content = Group(
+            Align.center(Text(self.BANNER.strip("\n"), style=self.PRIMARY_GREEN, justify="center")),
+            Align.center(Text(" ")),
+            Align.center(self._build_welcome_text()),
+            Align.center(self._build_version_text()),
+            Align.center(self._build_tagline_text()),
+            Align.center(Text(" ")),
+            Align.center(start_line.copy()),
+        )
+
+        return Panel.fit(content, border_style=self.PRIMARY_GREEN, padding=(1, 6))
+
+    def _build_welcome_text(self) -> Text:
+        text = Text("Welcome to ", style=Style(color="white", bold=True))
+        text.append("Strix", style=Style(color=self.PRIMARY_GREEN, bold=True))
+        text.append("!", style=Style(color="white", bold=True))
+        return text
+
+    def _build_version_text(self) -> Text:
+        return Text(f"v{self._version}", style=Style(color="white", dim=True))
+
+    def _build_tagline_text(self) -> Text:
+        return Text("Open-source AI hackers for your apps", style=Style(color="white", dim=True))
+
+    def _build_start_line_text(self, phase: int) -> Text:
+        emphasize = phase % 2 == 1
+        base_style = Style(color="white", dim=not emphasize, bold=emphasize)
+        strix_style = Style(color=self.PRIMARY_GREEN, bold=bool(emphasize))
+
+        text = Text("Starting ", style=base_style)
+        text.append("Strix", style=strix_style)
+        text.append(" Cybersecurity Agent", style=base_style)
+
+        return text
 
 
 class HelpScreen(ModalScreen):  # type: ignore[misc]
@@ -362,7 +440,7 @@ class StrixCLIApp(App):  # type: ignore[misc]
     def on_mount(self) -> None:
         self.title = "strix"
 
-        self.set_timer(3.0, self._hide_splash_screen)
+        self.set_timer(4.5, self._hide_splash_screen)
 
     def _hide_splash_screen(self) -> None:
         self.show_splash = False
