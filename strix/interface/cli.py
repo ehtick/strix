@@ -15,7 +15,6 @@ from strix.llm.config import LLMConfig
 from strix.telemetry.tracer import Tracer, set_global_tracer
 
 from .utils import (
-    build_final_stats_text,
     build_live_stats_text,
     format_vulnerability_report,
 )
@@ -179,25 +178,6 @@ async def run_cli(args: Any) -> None:  # noqa: PLR0915
     except Exception as e:
         console.print(f"[bold red]Error during penetration test:[/] {e}")
         raise
-
-    console.print()
-    final_stats_text = Text()
-    final_stats_text.append("📊 ", style="bold cyan")
-    final_stats_text.append("PENETRATION TEST COMPLETED", style="bold green")
-    final_stats_text.append("\n\n")
-
-    stats_text = build_final_stats_text(tracer)
-    if stats_text:
-        final_stats_text.append(stats_text)
-
-    final_stats_panel = Panel(
-        final_stats_text,
-        title="[bold green]✅ Final Statistics",
-        title_align="center",
-        border_style="green",
-        padding=(1, 2),
-    )
-    console.print(final_stats_panel)
 
     if tracer.final_scan_result:
         console.print()
