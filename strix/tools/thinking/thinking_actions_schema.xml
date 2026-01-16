@@ -19,33 +19,35 @@
     <examples>
   # Planning and strategy
   <function=think>
-  <parameter=thought>I need to analyze the scan results systematically. First, let me review
-  the open ports: 22 (SSH), 80 (HTTP), 443 (HTTPS), and 3306 (MySQL). The MySQL port being
-  externally accessible is a high priority security concern. I should check for default
-  credentials and version information. For the web services, I need to enumerate
-  directories and test for common web vulnerabilities.</parameter>
-  </function>
+  <parameter=thought>Analysis of the login endpoint SQL injection:
 
-  # Analysis of tool outputs
-  <function=think>
-  <parameter=thought>The Nmap scan revealed 15 open ports, but three stand out as concerning:
-  - Port 3306 (MySQL) - Database should not be exposed externally
-  - Port 5432 (PostgreSQL) - Another database port that's risky when public
-  - Port 6379 (Redis) - Often misconfigured and can lead to data exposure
-  I should prioritize testing these database services for authentication bypass and
-  information disclosure vulnerabilities.</parameter>
-  </function>
+Current State:
+- Confirmed SQL injection in POST /api/v1/auth/login
+- Backend database is PostgreSQL 14.2
+- Application user has full CRUD privileges
 
-  # Decision making and next steps
-  <function=think>
-  <parameter=thought>Based on the vulnerability scan results, I've identified several critical
-  issues that need immediate attention:
-  1. SQL injection in the login form (confirmed with sqlmap)
-  2. Reflected XSS in the search parameter
-  3. Directory traversal in the file upload function
-  I should document these findings with proof-of-concept exploits and assign appropriate
-  CVSS scores. The SQL injection poses the highest risk due to potential data
-  exfiltration.</parameter>
+Exploitation Strategy:
+1. First, enumerate database structure using UNION-based injection
+2. Extract user table schema and credentials
+3. Check for password hashing (MD5? bcrypt?)
+4. Look for admin accounts and API keys
+
+Risk Assessment:
+- CVSS Base Score: 9.8 (Critical)
+- Attack Vector: Network (remotely exploitable)
+- Privileges Required: None
+- Impact: Full database compromise
+
+Evidence Collected:
+- Error-based injection confirms PostgreSQL
+- Time-based payload: admin' AND pg_sleep(5)-- caused 5s delay
+- UNION injection reveals 8 columns in users table
+
+Next Actions:
+1. Write PoC exploit script in Python
+2. Extract password hashes for analysis
+3. Create vulnerability report with full details
+4. Test if same vulnerability exists in other endpoints</parameter>
   </function>
     </examples>
   </tool>

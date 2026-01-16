@@ -24,29 +24,54 @@
     <examples>
   # Document an interesting finding
   <function=create_note>
-  <parameter=title>Interesting Directory Found</parameter>
-  <parameter=content>Found /backup/ directory that might contain sensitive files. Directory listing
-               seems disabled but worth investigating further.</parameter>
+  <parameter=title>Authentication Bypass Findings</parameter>
+  <parameter=content>Discovered multiple authentication bypass vectors in the login system:
+
+1. SQL Injection in username field
+   - Payload: admin'--
+   - Result: Full authentication bypass
+   - Endpoint: POST /api/v1/auth/login
+
+2. JWT Token Weakness
+   - Algorithm confusion attack possible (RS256 -> HS256)
+   - Token expiration is 24 hours but no refresh rotation
+   - Token stored in localStorage (XSS risk)
+
+3. Password Reset Flow
+   - Reset tokens are only 6 digits (brute-forceable)
+   - No rate limiting on reset attempts
+   - Token valid for 48 hours
+
+Next Steps:
+- Extract full database via SQL injection
+- Test JWT manipulation attacks
+- Attempt password reset brute force</parameter>
   <parameter=category>findings</parameter>
-  <parameter=tags>["directory", "backup"]</parameter>
+  <parameter=tags>["auth", "sqli", "jwt", "critical"]</parameter>
   </function>
 
   # Methodology note
   <function=create_note>
-  <parameter=title>Authentication Flow Analysis</parameter>
-  <parameter=content>The application uses JWT tokens stored in localStorage. Token expiration is
-               set to 24 hours. Observed that refresh token rotation is not implemented.</parameter>
-  <parameter=category>methodology</parameter>
-  <parameter=tags>["auth", "jwt", "session"]</parameter>
-  </function>
+  <parameter=title>API Endpoint Mapping Complete</parameter>
+  <parameter=content>Completed comprehensive API enumeration using multiple techniques:
 
-  # Research question
-  <function=create_note>
-  <parameter=title>Custom Header Investigation</parameter>
-  <parameter=content>The API returns a custom X-Request-ID header. Need to research if this
-               could be used for user tracking or has any security implications.</parameter>
-  <parameter=category>questions</parameter>
-  <parameter=tags>["headers", "research"]</parameter>
+Discovered Endpoints:
+- /api/v1/auth/* - Authentication endpoints (login, register, reset)
+- /api/v1/users/* - User management (profile, settings, admin)
+- /api/v1/orders/* - Order management (IDOR vulnerability confirmed)
+- /api/v1/admin/* - Admin panel (403 but may be bypassable)
+- /api/internal/* - Internal APIs (should not be exposed)
+
+Methods Used:
+- Analyzed JavaScript bundles for API calls
+- Bruteforced common paths with ffuf
+- Reviewed OpenAPI/Swagger documentation at /api/docs
+- Monitored traffic during normal application usage
+
+Priority Targets:
+The /api/internal/* endpoints are high priority as they appear to lack authentication checks based on error message differences.</parameter>
+  <parameter=category>methodology</parameter>
+  <parameter=tags>["api", "enumeration", "recon"]</parameter>
   </function>
     </examples>
   </tool>

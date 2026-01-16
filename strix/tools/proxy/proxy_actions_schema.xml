@@ -1,4 +1,3 @@
-<?xml version="1.0" ?>
 <tools>
   <tool name="list_requests">
     <description>List and filter proxy requests using HTTPQL with pagination.</description>
