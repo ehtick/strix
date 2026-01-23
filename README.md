@@ -33,14 +33,6 @@
 
 <br/>
 
-<div align="center">
-  <a href="https://strix.ai">
-    <img src=".github/screenshot.png" alt="Strix Demo" width="900" style="border-radius: 16px;">
-  </a>
-</div>
-
-<br>
-
 > [!TIP]
 > **New!** Strix integrates seamlessly with GitHub Actions and CI/CD pipelines. Automatically scan for vulnerabilities on every pull request and block insecure code before it reaches production!
 
@@ -60,14 +52,22 @@ Strix are autonomous AI agents that act just like real hackers - they run your c
 - **Auto‑fix & reporting** to accelerate remediation
 
 
+<br>
+
+
+<div align="center">
+  <a href="https://strix.ai">
+    <img src=".github/screenshot.png" alt="Strix Demo" width="1000" style="border-radius: 16px;">
+  </a>
+</div>
+
+
 ## 🎯 Use Cases
 
 - **Application Security Testing** - Detect and validate critical vulnerabilities in your applications
 - **Rapid Penetration Testing** - Get penetration tests done in hours, not weeks, with compliance reports
 - **Bug Bounty Automation** - Automate bug bounty research and generate PoCs for faster reporting
 - **CI/CD Integration** - Run tests in CI/CD to block vulnerabilities before reaching production
-
----
 
 ## 🚀 Quick Start
 
