@@ -82,9 +82,6 @@ Strix are autonomous AI agents that act just like real hackers - they run your c
 # Install Strix
 curl -sSL https://strix.ai/install | bash
 
-# Or via pipx
-pipx install strix-agent
-
 # Configure your AI provider
 export STRIX_LLM="openai/gpt-5"  # or "strix/gpt-5" via Strix Router (https://models.strix.ai)
 export LLM_API_KEY="your-api-key"
