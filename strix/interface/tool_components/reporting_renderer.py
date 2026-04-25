@@ -6,9 +6,11 @@ from pygments.styles import get_style_by_name
 from rich.text import Text
 from textual.widgets import Static
 
-from strix.tools.reporting.reporting_actions import (
-    parse_code_locations_xml,
-    parse_cvss_xml,
+from strix.tools.reporting.tool import (
+    _parse_code_locations_xml as parse_code_locations_xml,
+)
+from strix.tools.reporting.tool import (
+    _parse_cvss_xml as parse_cvss_xml,
 )
 
 from .base_renderer import BaseToolRenderer

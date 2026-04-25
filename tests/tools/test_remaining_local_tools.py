@@ -85,8 +85,8 @@ async def test_web_search_no_api_key_returns_structured_error(
 
 
 @pytest.mark.asyncio
-async def test_web_search_delegates_to_impl(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Legacy ``web_search`` returns dict; wrapper JSON-encodes it."""
+async def test_web_search_delegates_to_perplexity(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The wrapper invokes the Perplexity HTTP path on a thread."""
     monkeypatch.setenv("PERPLEXITY_API_KEY", "fake-key")
 
     fake_result = {
@@ -96,13 +96,13 @@ async def test_web_search_delegates_to_impl(monkeypatch: pytest.MonkeyPatch) -> 
         "message": "Web search completed successfully",
     }
     with patch(
-        "strix.tools.web_search.tool._impl.web_search",
+        "strix.tools.web_search.tool._do_search",
         return_value=fake_result,
-    ) as legacy:
+    ) as do_search:
         out = await _invoke(web_search, _ctx_for(), query="xss techniques")
 
     assert out == fake_result
-    legacy.assert_called_once_with(query="xss techniques")
+    do_search.assert_called_once_with("xss techniques")
 
 
 # --- file_edit (sandbox-bound) -------------------------------------------
@@ -197,7 +197,7 @@ async def test_create_vulnerability_report_validates_required_fields() -> None:
 
 @pytest.mark.asyncio
 async def test_create_vulnerability_report_delegates_to_impl() -> None:
-    """Verify the wrapper passes all params through to the legacy function."""
+    """Verify the wrapper threads its kwargs through to the implementation."""
     fake_result = {
         "success": True,
         "message": "Vulnerability report 'X' created successfully",
@@ -206,9 +206,9 @@ async def test_create_vulnerability_report_delegates_to_impl() -> None:
         "cvss_score": 7.5,
     }
     with patch(
-        "strix.tools.reporting.tool._impl.create_vulnerability_report",
+        "strix.tools.reporting.tool._do_create",
         return_value=fake_result,
-    ) as legacy:
+    ) as do_create:
         out = await _invoke(
             create_vulnerability_report,
             _ctx_for(),
@@ -225,7 +225,7 @@ async def test_create_vulnerability_report_delegates_to_impl() -> None:
         )
 
     assert out == fake_result
-    kwargs = legacy.call_args.kwargs
+    kwargs = do_create.call_args.kwargs
     assert kwargs["title"] == "t"
     assert kwargs["cve"] == "CVE-2024-12345"
     # Optional params we didn't pass should still be forwarded as None.
@@ -252,18 +252,40 @@ async def test_finish_scan_validates_empty_fields() -> None:
 
 
 @pytest.mark.asyncio
-async def test_finish_scan_delegates_to_impl() -> None:
-    """Wrapper must pass the legacy adapter and the four sections through."""
-    fake_result = {
-        "success": True,
-        "scan_completed": True,
-        "message": "Scan completed successfully",
-        "vulnerabilities_found": 3,
-    }
+async def test_finish_scan_rejects_subagent() -> None:
+    """A subagent (parent_id is set) must not be able to finish the scan."""
+    ctx = _Ctx(
+        context={
+            "agent_id": "child-1",
+            "parent_id": "root-1",
+            "tool_server_host_port": 12345,
+            "sandbox_token": "test-token",
+        },
+    )
+    out = await _invoke(
+        finish_scan,
+        ctx,
+        executive_summary="es",
+        methodology="m",
+        technical_analysis="ta",
+        recommendations="r",
+    )
+    assert out["success"] is False
+    assert out["error"] == "finish_scan_wrong_agent"
+
+
+@pytest.mark.asyncio
+async def test_finish_scan_persists_via_tracer() -> None:
+    """When a global tracer exists, finish_scan should write the four sections."""
+    from unittest.mock import MagicMock
+
+    fake_tracer = MagicMock()
+    fake_tracer.vulnerability_reports = [{}, {}, {}]
+
     with patch(
-        "strix.tools.finish.tool._impl.finish_scan",
-        return_value=fake_result,
-    ) as legacy:
+        "strix.telemetry.tracer.get_global_tracer",
+        return_value=fake_tracer,
+    ):
         out = await _invoke(
             finish_scan,
             _ctx_for("root-agent"),
@@ -273,7 +295,11 @@ async def test_finish_scan_delegates_to_impl() -> None:
             recommendations="r",
         )
 
-    assert out == fake_result
-    kwargs = legacy.call_args.kwargs
-    assert kwargs["executive_summary"] == "es"
-    assert kwargs["agent_state"].agent_id == "root-agent"
+    assert out["success"] is True
+    assert out["vulnerabilities_found"] == 3
+    fake_tracer.update_scan_final_fields.assert_called_once_with(
+        executive_summary="es",
+        methodology="m",
+        technical_analysis="ta",
+        recommendations="r",
+    )

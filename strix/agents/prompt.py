@@ -17,7 +17,6 @@ from typing import Any
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from strix.skills import load_skills
-from strix.tools import get_tools_prompt
 from strix.utils.resource_paths import get_strix_resource_path
 
 
@@ -103,7 +102,6 @@ def render_system_prompt(
         env.globals["get_skill"] = lambda name: skill_content.get(name, "")
 
         rendered = env.get_template("system_prompt.jinja").render(
-            get_tools_prompt=get_tools_prompt,
             loaded_skill_names=list(skill_content.keys()),
             interactive=interactive,
             system_prompt_context=system_prompt_context or {},

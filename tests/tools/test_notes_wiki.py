@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from strix.telemetry.tracer import Tracer, get_global_tracer, set_global_tracer
-from strix.tools.notes import notes_actions
+from strix.tools.notes import tools as notes_actions
 
 
 def _reset_notes_state() -> None:
@@ -18,7 +18,7 @@ def test_wiki_notes_are_persisted_and_removed(tmp_path: Path, monkeypatch) -> No
     set_global_tracer(tracer)
 
     try:
-        created = notes_actions.create_note(
+        created = notes_actions._create_note_impl(
             title="Repo Map",
             content="## Architecture\n- monolith",
             category="wiki",
@@ -36,14 +36,14 @@ def test_wiki_notes_are_persisted_and_removed(tmp_path: Path, monkeypatch) -> No
         assert wiki_path.exists()
         assert "## Architecture" in wiki_path.read_text(encoding="utf-8")
 
-        updated = notes_actions.update_note(
+        updated = notes_actions._update_note_impl(
             note_id=note_id,
             content="## Architecture\n- service-oriented",
         )
         assert updated["success"] is True
         assert "service-oriented" in wiki_path.read_text(encoding="utf-8")
 
-        deleted = notes_actions.delete_note(note_id=note_id)
+        deleted = notes_actions._delete_note_impl(note_id=note_id)
         assert deleted["success"] is True
         assert wiki_path.exists() is False
     finally:
@@ -60,7 +60,7 @@ def test_notes_jsonl_replay_survives_memory_reset(tmp_path: Path, monkeypatch) -
     set_global_tracer(tracer)
 
     try:
-        created = notes_actions.create_note(
+        created = notes_actions._create_note_impl(
             title="Auth findings",
             content="initial finding",
             category="findings",
@@ -74,24 +74,24 @@ def test_notes_jsonl_replay_survives_memory_reset(tmp_path: Path, monkeypatch) -
         assert notes_path.exists() is True
 
         _reset_notes_state()
-        listed = notes_actions.list_notes(category="findings")
+        listed = notes_actions._list_notes_impl(category="findings")
         assert listed["success"] is True
         assert listed["total_count"] == 1
         assert listed["notes"][0]["note_id"] == note_id
         assert "content" not in listed["notes"][0]
         assert "content_preview" in listed["notes"][0]
 
-        updated = notes_actions.update_note(note_id=note_id, content="updated finding")
+        updated = notes_actions._update_note_impl(note_id=note_id, content="updated finding")
         assert updated["success"] is True
 
         _reset_notes_state()
-        listed_after_update = notes_actions.list_notes(search="updated finding")
+        listed_after_update = notes_actions._list_notes_impl(search="updated finding")
         assert listed_after_update["success"] is True
         assert listed_after_update["total_count"] == 1
         assert listed_after_update["notes"][0]["note_id"] == note_id
         assert listed_after_update["notes"][0]["content_preview"] == "updated finding"
 
-        listed_with_content = notes_actions.list_notes(
+        listed_with_content = notes_actions._list_notes_impl(
             category="findings",
             include_content=True,
         )
@@ -99,11 +99,11 @@ def test_notes_jsonl_replay_survives_memory_reset(tmp_path: Path, monkeypatch) -
         assert listed_with_content["total_count"] == 1
         assert listed_with_content["notes"][0]["content"] == "updated finding"
 
-        deleted = notes_actions.delete_note(note_id=note_id)
+        deleted = notes_actions._delete_note_impl(note_id=note_id)
         assert deleted["success"] is True
 
         _reset_notes_state()
-        listed_after_delete = notes_actions.list_notes(category="findings")
+        listed_after_delete = notes_actions._list_notes_impl(category="findings")
         assert listed_after_delete["success"] is True
         assert listed_after_delete["total_count"] == 0
     finally:
@@ -120,7 +120,7 @@ def test_get_note_returns_full_note(tmp_path: Path, monkeypatch) -> None:
     set_global_tracer(tracer)
 
     try:
-        created = notes_actions.create_note(
+        created = notes_actions._create_note_impl(
             title="Repo wiki",
             content="entrypoints and sinks",
             category="wiki",
@@ -130,7 +130,7 @@ def test_get_note_returns_full_note(tmp_path: Path, monkeypatch) -> None:
         note_id = created["note_id"]
         assert isinstance(note_id, str)
 
-        result = notes_actions.get_note(note_id=note_id)
+        result = notes_actions._get_note_impl(note_id=note_id)
         assert result["success"] is True
         assert result["note"]["note_id"] == note_id
         assert result["note"]["content"] == "entrypoints and sinks"
@@ -148,7 +148,7 @@ def test_append_note_content_appends_delta(tmp_path: Path, monkeypatch) -> None:
     set_global_tracer(tracer)
 
     try:
-        created = notes_actions.create_note(
+        created = notes_actions._create_note_impl(
             title="Repo wiki",
             content="base",
             category="wiki",
@@ -164,7 +164,7 @@ def test_append_note_content_appends_delta(tmp_path: Path, monkeypatch) -> None:
         )
         assert appended["success"] is True
 
-        loaded = notes_actions.get_note(note_id=note_id)
+        loaded = notes_actions._get_note_impl(note_id=note_id)
         assert loaded["success"] is True
         assert loaded["note"]["content"] == "base\n\n## Agent Update: worker\nSummary: done"
     finally:
@@ -183,7 +183,7 @@ def test_list_and_get_note_handle_wiki_repersist_oserror_gracefully(
     set_global_tracer(tracer)
 
     try:
-        created = notes_actions.create_note(
+        created = notes_actions._create_note_impl(
             title="Repo wiki",
             content="initial wiki content",
             category="wiki",
@@ -200,12 +200,12 @@ def test_list_and_get_note_handle_wiki_repersist_oserror_gracefully(
 
         monkeypatch.setattr(notes_actions, "_persist_wiki_note", _raise_oserror)
 
-        listed = notes_actions.list_notes(category="wiki")
+        listed = notes_actions._list_notes_impl(category="wiki")
         assert listed["success"] is True
         assert listed["total_count"] == 1
         assert listed["notes"][0]["note_id"] == note_id
 
-        fetched = notes_actions.get_note(note_id=note_id)
+        fetched = notes_actions._get_note_impl(note_id=note_id)
         assert fetched["success"] is True
         assert fetched["note"]["note_id"] == note_id
         assert fetched["note"]["content"] == "initial wiki content"

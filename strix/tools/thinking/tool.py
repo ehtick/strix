@@ -1,19 +1,10 @@
-"""SDK function-tool wrapper for the legacy ``think`` tool.
-
-Pattern: thin async wrapper that delegates to the legacy implementation
-in :mod:`strix.tools.thinking.thinking_actions`. The legacy function is
-sync and pure (no I/O), so we don't even need ``asyncio.to_thread``.
-
-Validates the simplest tool-port pattern: legacy function in, JSON string
-out, no sandbox involvement.
-"""
+"""``think`` — record a private chain-of-thought note with no side effects."""
 
 from __future__ import annotations
 
 import json
 
 from strix.tools._decorator import strix_tool
-from strix.tools.thinking.thinking_actions import think as _legacy_think
 
 
 @strix_tool(timeout=10)
@@ -28,5 +19,12 @@ async def think(thought: str) -> str:
     Args:
         thought: The agent's reasoning to record. Must be non-empty.
     """
-    result = _legacy_think(thought)
-    return json.dumps(result, ensure_ascii=False)
+    if not thought or not thought.strip():
+        return json.dumps({"success": False, "message": "Thought cannot be empty"})
+    return json.dumps(
+        {
+            "success": True,
+            "message": (f"Thought recorded successfully with {len(thought.strip())} characters"),
+        },
+        ensure_ascii=False,
+    )

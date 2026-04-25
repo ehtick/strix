@@ -20,7 +20,7 @@ from unittest.mock import patch
 import pytest
 from agents.tool import FunctionTool
 
-from strix.tools.notes import notes_actions as _notes_impl
+from strix.tools.notes import tools as _notes_impl
 from strix.tools.notes.tools import (
     create_note,
     delete_note,
@@ -98,9 +98,9 @@ async def test_think_rejects_empty() -> None:
 @pytest.fixture(autouse=True)
 def _isolate_todo_storage() -> None:
     """Each test starts with an empty todo store so tests don't bleed."""
-    from strix.tools.todo import todo_actions
+    from strix.tools.todo import tools as todo_module
 
-    todo_actions._todos_storage.clear()
+    todo_module._todos_storage.clear()
 
 
 def test_todo_tools_are_function_tools() -> None:

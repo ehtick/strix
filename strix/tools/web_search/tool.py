@@ -1,42 +1,97 @@
-"""SDK function-tool wrapper for the legacy ``web_search`` tool.
-
-The legacy ``web_search_actions.web_search`` is a synchronous Perplexity
-API call (300s timeout, ``requests``). We wrap it with
-``asyncio.to_thread`` so the call doesn't block the SDK event loop while
-the API responds — same parity for the model, no surprises.
-
-Pattern matches notes/todo/think wrappers from Phase 2.3.
-"""
+"""``web_search`` — Perplexity-backed security-focused web search."""
 
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 from typing import Any
 
+import requests
 from agents import RunContextWrapper
 
 from strix.tools._decorator import strix_tool
-from strix.tools.web_search import web_search_actions as _impl
 
 
-def _dump(result: dict[str, Any]) -> str:
-    return json.dumps(result, ensure_ascii=False, default=str)
+_SYSTEM_PROMPT = """You are assisting a cybersecurity agent specialized in vulnerability scanning
+and security assessment running on Kali Linux. When responding to search queries:
+
+1. Prioritize cybersecurity-relevant information including:
+   - Vulnerability details (CVEs, CVSS scores, impact)
+   - Security tools, techniques, and methodologies
+   - Exploit information and proof-of-concepts
+   - Security best practices and mitigations
+   - Penetration testing approaches
+   - Web application security findings
+
+2. Provide technical depth appropriate for security professionals
+3. Include specific versions, configurations, and technical details when available
+4. Focus on actionable intelligence for security assessment
+5. Cite reliable security sources (NIST, OWASP, CVE databases, security vendors)
+6. When providing commands or installation instructions, prioritize Kali Linux compatibility
+   and use apt package manager or tools pre-installed in Kali
+7. Be detailed and specific - avoid general answers. Always include concrete code examples,
+   command-line instructions, configuration snippets, or practical implementation steps
+   when applicable
+
+Structure your response to be comprehensive yet concise, emphasizing the most critical
+security implications and details."""
 
 
-# Perplexity request timeout in the legacy code is 300s; give the SDK
-# tool a slightly larger budget so the network round-trip + JSON decode
-# doesn't push us over the edge under load.
+def _do_search(query: str) -> dict[str, Any]:
+    api_key = os.getenv("PERPLEXITY_API_KEY")
+    if not api_key:
+        return {
+            "success": False,
+            "message": "PERPLEXITY_API_KEY environment variable not set",
+            "results": [],
+        }
+
+    url = "https://api.perplexity.ai/chat/completions"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    payload = {
+        "model": "sonar-reasoning-pro",
+        "messages": [
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user", "content": query},
+        ],
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=300)
+        response.raise_for_status()
+        content = response.json()["choices"][0]["message"]["content"]
+    except requests.exceptions.Timeout:
+        return {"success": False, "message": "Request timed out", "results": []}
+    except requests.exceptions.RequestException as e:
+        return {"success": False, "message": f"API request failed: {e!s}", "results": []}
+    except KeyError as e:
+        return {
+            "success": False,
+            "message": f"Unexpected API response format: missing {e!s}",
+            "results": [],
+        }
+    except Exception as e:  # noqa: BLE001
+        return {"success": False, "message": f"Web search failed: {e!s}", "results": []}
+    else:
+        return {
+            "success": True,
+            "query": query,
+            "content": content,
+            "message": "Web search completed successfully",
+        }
+
+
+# Perplexity request timeout is 300s; give the SDK a slightly larger
+# budget so the round-trip + JSON decode doesn't push us over.
 @strix_tool(timeout=330)
 async def web_search(ctx: RunContextWrapper, query: str) -> str:
     """Search the web with Perplexity, scoped to security-relevant content.
 
-    Returns a JSON-encoded ``{"success": bool, "content": str, ...}``
-    dict matching the legacy shape exactly.
-
     Args:
-        query: The search query. The legacy tool prepends a security-focused
-            system prompt to bias results toward CVEs, exploits, and Kali-
-            compatible commands.
+        query: The search query. A security-focused system prompt biases
+            results toward CVEs, exploits, and Kali-compatible commands.
     """
-    return _dump(await asyncio.to_thread(_impl.web_search, query=query))
+    del ctx
+    result = await asyncio.to_thread(_do_search, query)
+    return json.dumps(result, ensure_ascii=False, default=str)

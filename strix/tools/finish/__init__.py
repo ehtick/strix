@@ -1,4 +1,4 @@
-from .finish_actions import finish_scan
+from .tool import finish_scan
 
 
 __all__ = ["finish_scan"]

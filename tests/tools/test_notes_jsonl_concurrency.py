@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 import pytest
 
-from strix.tools.notes.notes_actions import _append_note_event
+from strix.tools.notes.tools import _append_note_event
 
 
 @pytest.fixture
@@ -27,7 +27,7 @@ def notes_path(tmp_path: Path) -> Iterator[Path]:
     target.parent.mkdir(parents=True, exist_ok=True)
 
     with patch(
-        "strix.tools.notes.notes_actions._get_notes_jsonl_path",
+        "strix.tools.notes.tools._get_notes_jsonl_path",
         return_value=target,
     ):
         yield target

@@ -1,4 +1,4 @@
-from .thinking_actions import think
+from .tool import think
 
 
 __all__ = ["think"]

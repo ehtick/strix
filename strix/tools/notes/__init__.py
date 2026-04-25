@@ -1,4 +1,5 @@
-from .notes_actions import (
+from .tools import (
+    append_note_content,
     create_note,
     delete_note,
     get_note,
@@ -8,6 +9,7 @@ from .notes_actions import (
 
 
 __all__ = [
+    "append_note_content",
     "create_note",
     "delete_note",
     "get_note",

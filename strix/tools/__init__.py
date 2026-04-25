@@ -1,14 +1,13 @@
 """Tool package.
 
-The package init wires the in-container side: importing every tool
-sub-package triggers the ``@register_tool`` decorations that populate
-``strix.tools.registry.tools``, which the in-container FastAPI tool
-server (:mod:`strix.runtime.tool_server`) dispatches against.
+Importing every sub-package triggers the ``@register_tool``
+decorations that populate ``strix.tools.registry.tools``. The
+in-container FastAPI tool server (:mod:`strix.runtime.tool_server`)
+dispatches against that registry.
 
-Host-side SDK function tools live in ``<family>/tool.py`` (or
-``tools.py``) and are imported directly by
-:mod:`strix.agents.factory` — they do not flow through this package
-init's ``register_tool`` registry.
+Host-side SDK function tools live in ``<family>/tool[s].py`` and are
+imported directly by :mod:`strix.agents.factory` — they don't flow
+through this registry.
 """
 
 from .agents_graph import *  # noqa: F403
@@ -22,8 +21,6 @@ from .registry import (
     ImplementedInClientSideOnlyError,
     get_tool_by_name,
     get_tool_names,
-    get_tools_prompt,
-    needs_agent_state,
     register_tool,
     tools,
 )
@@ -38,8 +35,6 @@ __all__ = [
     "ImplementedInClientSideOnlyError",
     "get_tool_by_name",
     "get_tool_names",
-    "get_tools_prompt",
-    "needs_agent_state",
     "register_tool",
     "tools",
 ]
