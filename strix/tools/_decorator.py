@@ -40,6 +40,7 @@ def strix_tool(
     timeout_behavior: _ToolBehavior = "error_as_result",
     name_override: str | None = None,
     description_override: str | None = None,
+    strict_mode: bool = True,
 ) -> Callable[[_ToolFn], FunctionTool]:
     """Wrap ``agents.function_tool`` with Strix defaults.
 
@@ -48,6 +49,13 @@ def strix_tool(
     ``async def``; sync libraries (libtmux, IPython) get wrapped in
     ``asyncio.to_thread`` inside the async tool body.
 
+    The SDK enforces ``strict_mode=True`` by default, which forbids
+    free-form ``dict[str, X]`` parameters (the strict JSON schema needs
+    ``additionalProperties: false``). A handful of legacy tools
+    (``send_request``, ``repeat_request``) take arbitrary header /
+    modification dicts whose keys can't be enumerated, so they must
+    opt out of strict mode to preserve parity with the XML schema.
+
     Usage::
 
         @strix_tool()
@@ -55,10 +63,16 @@ def strix_tool(
 
         @strix_tool(timeout=300, timeout_behavior="raise_exception")
         async def critical_tool(ctx: RunContextWrapper, ...) -> str: ...
+
+        @strix_tool(strict_mode=False)
+        async def free_form_dict_tool(
+            ctx: RunContextWrapper, headers: dict[str, str],
+        ) -> str: ...
     """
     return function_tool(
         timeout=timeout,
         timeout_behavior=timeout_behavior,
         name_override=name_override,
         description_override=description_override,
+        strict_mode=strict_mode,
     )
