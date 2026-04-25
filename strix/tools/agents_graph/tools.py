@@ -57,11 +57,14 @@ def _dump(result: dict[str, Any]) -> str:
 
 @strix_tool(timeout=30)
 async def view_agent_graph(ctx: RunContextWrapper) -> str:
-    """Render the multi-agent tree starting from each root.
+    """Print the multi-agent tree — every agent, its parent, its status.
 
-    Output is a single string the model can parse: indented bullet list,
-    one line per agent, status in brackets. Roots are agents whose
-    ``parent_of[id]`` is ``None``.
+    Use before spawning a new agent (don't duplicate work — check whether
+    something specialized for that task already exists) and any time you
+    want a snapshot of who's still ``running`` / ``waiting`` /
+    ``completed`` / ``crashed`` / ``stopped``. Output is an indented
+    bullet list with status in brackets; the agent that called this tool
+    is marked ``← you``.
     """
     inner = ctx.context if isinstance(ctx.context, dict) else {}
     bus = inner.get("bus")
@@ -107,7 +110,17 @@ async def view_agent_graph(ctx: RunContextWrapper) -> str:
 
 @strix_tool(timeout=30)
 async def agent_status(ctx: RunContextWrapper, agent_id: str) -> str:
-    """Inspect one agent's lifecycle state and pending message count."""
+    """Look up one agent's lifecycle state + pending message count.
+
+    Use when you need precise state on a specific agent (e.g., "is the
+    XSS specialist still going?") rather than the full tree view.
+    Returns ``status`` (``running`` / ``waiting`` / ``completed`` /
+    ``crashed`` / ``stopped``), ``parent_id``, and ``pending_messages``.
+
+    Args:
+        agent_id: The 8-char id from ``view_agent_graph`` /
+            ``create_agent``.
+    """
     inner = ctx.context if isinstance(ctx.context, dict) else {}
     bus = inner.get("bus")
     if bus is None:
@@ -141,12 +154,29 @@ async def send_message_to_agent(
     message_type: Literal["query", "instruction", "information"] = "information",
     priority: Literal["low", "normal", "high", "urgent"] = "normal",
 ) -> str:
-    """Queue a message for another agent's inbox.
+    """Send a message to another agent's inbox — sparingly.
 
-    The target's next ``inject_messages_filter`` pass (top of its next LLM
-    turn) drains the inbox and surfaces the message wrapped in
-    ``<inter_agent_message>``. Messages to a finalized agent are dropped
-    silently by the bus (C13).
+    Inter-agent messages are surfaced at the top of the target's next
+    LLM turn. Use only when essential:
+
+    - Sharing a discovered finding/credential another agent needs.
+    - Asking a specialist a focused question.
+    - Coordinating who covers what (avoid overlap).
+    - Telling a child to wrap up or change course.
+
+    **Don't** use for routine "hello/status" pings, for context the
+    target already has (children inherit parent history), or when
+    parent/child completion via ``agent_finish`` already covers the
+    flow. Messages to a finalized agent are dropped.
+
+    Args:
+        target_agent_id: Recipient's 8-char id.
+        message: The full message body. Be specific — include payloads,
+            URLs, or what you want them to do, not just headlines.
+        message_type: ``query`` (you want a reply), ``instruction``
+            (you're directing them), ``information`` (FYI, no reply
+            expected). Default ``information``.
+        priority: ``low`` / ``normal`` / ``high`` / ``urgent``.
     """
     inner = ctx.context if isinstance(ctx.context, dict) else {}
     bus = inner.get("bus")
@@ -205,16 +235,31 @@ async def wait_for_message(
     reason: str = "Waiting for messages from other agents",
     timeout_seconds: int = 600,
 ) -> str:
-    """Block this agent's turn until a message arrives or ``timeout_seconds``.
+    """Pause this agent until a message lands in its inbox (or timeout).
 
-    Implementation polls ``bus.inboxes`` once per second. Cheaper than an
-    asyncio.Event because the message bus already serializes through its
-    own lock — a missed wakeup on Event would be subtle to debug, while
-    polling is trivially correct.
+    Use when you have nothing useful to do until a child/peer responds
+    — typically after spawning subagents and you want to wait for
+    their completion reports. The agent automatically resumes when any
+    message arrives.
+
+    **Critical caveats:**
+
+    - **Never** call this if you finished your own task and have **no**
+      child agents running — that's a permanent stall. Call
+      ``finish_scan`` (root) or ``agent_finish`` (subagent) instead.
+    - If you're waiting on an agent that **isn't your child**, message
+      it first asking it to ping you when done — otherwise it has no
+      reason to send to your inbox and you'll wait the full timeout.
+    - Children update the parent automatically via ``agent_finish``
+      → no extra coordination needed.
 
     Args:
-        reason: Human-readable note shown in graph snapshots while waiting.
-        timeout_seconds: Cap on the wait. 600s matches the legacy default.
+        reason: One-line note shown in graph snapshots while you're
+            waiting (helps a human or sibling agent debug who's stuck
+            on what).
+        timeout_seconds: Hard cap (default 600s). On timeout the tool
+            returns and you decide whether to keep working or wait
+            again.
     """
     inner = ctx.context if isinstance(ctx.context, dict) else {}
     bus = inner.get("bus")
@@ -268,22 +313,44 @@ async def create_agent(
     inherit_context: bool = True,
     skills: list[str] | None = None,
 ) -> str:
-    """Spawn a child agent that runs in parallel via ``asyncio.create_task``.
+    """Spawn a specialist child agent to run in parallel.
 
-    The child's ``Runner.run`` task handle is stored in ``bus.tasks[child_id]``
-    so a root-level cancel can cascade to descendants (C9). The child is
-    registered with the bus before the task starts so messages aimed at it
-    don't get dropped during the brief register→start window.
+    Decompose complex pentests by handing focused subtasks to dedicated
+    children. The child runs asynchronously — the parent continues
+    immediately and can ``wait_for_message`` later (or just keep
+    working in parallel). When the child calls ``agent_finish``, its
+    completion report lands in the parent's inbox.
+
+    **Before spawning, call ``view_agent_graph``** to confirm no
+    existing agent already covers this scope — duplicate specialists
+    waste turns and create coordination headaches.
+
+    **Specialization principles:**
+
+    - Most agents need at least one ``skill`` to be useful.
+    - Aim for **1-3 related skills** per agent. Up to 5 only when the
+      task genuinely spans them.
+    - One skill = most focused (e.g., XSS-only). Five skills = upper
+      bound.
+    - Match the ``name`` to the focus (``XSS Specialist``,
+      ``SQLi Validator``, ``Auth Specialist``).
+
+    **When to spawn vs do it yourself:**
+
+    - Spawn when the subtask is large, parallelizable, or needs
+      different specialization than what you're already doing.
+    - Don't spawn for trivial one-shot probes — just run the tool
+      yourself.
 
     Args:
-        name: Human-readable child name (also stored in ``bus.names``).
-        task: The task description handed to the child agent.
-        inherit_context: When True, the child receives a copy of the parent's
-            input items as background context, wrapped in
-            ``<inherited_context_from_parent>``. Default True.
-        skills: Optional list of skill names the child should preload.
-
-    Returns a JSON-encoded ``{"success": ..., "agent_id": ...}``.
+        name: Human-readable child name (used in graph views and
+            ``send_message_to_agent`` flows).
+        task: Specific objective. Be concrete — what to test, what
+            success looks like, any constraints.
+        inherit_context: Default ``True``. The child receives the
+            parent's input history as background; only set ``False``
+            when starting a clean-slate task.
+        skills: Comma-separated skill names. Max 5; prefer 1-3.
     """
     inner = ctx.context if isinstance(ctx.context, dict) else {}
     bus = inner.get("bus")
@@ -412,15 +479,39 @@ async def agent_finish(
     report_to_parent: bool = True,
     final_recommendations: list[str] | None = None,
 ) -> str:
-    """Subagent-only termination: post a completion report and signal the SDK.
+    """Subagent termination — post a completion report to the parent.
 
-    Sets ``ctx.context['agent_finish_called'] = True`` so the on_agent_end
-    hook records "completed" rather than "crashed". The SDK terminates the
-    child's loop because every child is built with
-    ``tool_use_behavior={"stop_at_tool_names": ["agent_finish"]}`` (C4).
+    **Subagents only.** Root agents must call ``finish_scan`` instead;
+    this tool refuses to run for root agents. Calling this:
 
-    Root agents must call ``finish_scan`` instead. This tool refuses to run
-    when ``parent_id`` is None.
+    1. Marks the subagent as ``completed``.
+    2. Posts a structured ``<agent_completion_report>`` to the
+       parent's inbox (when ``report_to_parent`` is true).
+    3. Stops this subagent's execution.
+
+    **Vulnerability findings must already be filed via
+    ``create_vulnerability_report`` before calling this.** The
+    ``findings`` field here is for narrative summary only — it does
+    not register vulns in the scan report.
+
+    Write the summary as if the parent has no idea what you were
+    doing: what did you test, what did you find/confirm/rule out,
+    what's still open.
+
+    Args:
+        result_summary: What you accomplished and discovered. Concrete
+            and specific (URLs, parameters, payloads that worked).
+        findings: Optional bullet list of confirmed observations. For
+            credit-bearing vulnerabilities, file
+            ``create_vulnerability_report`` first; this is for
+            narrative.
+        success: Whether the assigned subtask was completed
+            successfully. Default ``True``.
+        report_to_parent: Whether to deliver the completion report to
+            the parent's inbox. Default ``True``.
+        final_recommendations: Optional next-step suggestions for the
+            parent (e.g., "prioritize testing X", "spawn an agent to
+            cover Y").
     """
     inner = ctx.context if isinstance(ctx.context, dict) else {}
     bus = inner.get("bus")

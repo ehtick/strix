@@ -86,11 +86,40 @@ def _do_search(query: str) -> dict[str, Any]:
 # budget so the round-trip + JSON decode doesn't push us over.
 @strix_tool(timeout=330)
 async def web_search(ctx: RunContextWrapper, query: str) -> str:
-    """Search the web with Perplexity, scoped to security-relevant content.
+    """Real-time web search via Perplexity — your primary research tool.
+
+    Use it liberally for anything that's not in your training data:
+
+    - Current CVEs, advisories, and 0-days for a specific
+      service/version (``OpenSSH 9.6 RCE``, ``Jenkins 2.401.3 auth
+      bypass``).
+    - Latest WAF / EDR bypass techniques (``Cloudflare WAF SQLi
+      bypass 2025``, ``CrowdStrike Falcon evasion``).
+    - Tool documentation, flag references, payload galleries.
+    - Target reconnaissance / OSINT (company tech stack, leaked
+      credentials, exposed assets).
+    - Cloud-provider misconfiguration patterns
+      (Azure/AWS/GCP-specific attack paths).
+    - Bug-bounty writeups and security research papers.
+    - Compliance frameworks and CWE/CVSS guidance.
+    - Picking the right Python lib / Kali tool for a job (``best 2025
+      lib for JWT alg-confusion``).
+    - When stuck — looking up the exact error message, ``Access
+      denied`` quirks, kernel-specific local-privesc exploits.
+
+    Be specific: include version numbers, error messages, target
+    technology, and the exact problem you're stuck on. The more context
+    in the query, the more actionable the answer. Vague queries get
+    generic answers.
+
+    A security-focused system prompt biases responses toward CVEs,
+    exploits, Kali-compatible tooling, and concrete code/command
+    examples.
 
     Args:
-        query: The search query. A security-focused system prompt biases
-            results toward CVEs, exploits, and Kali-compatible commands.
+        query: The search query — a full sentence with version numbers,
+            target tech, and the specific question. Treat it like a
+            ticket title for a senior security engineer.
     """
     del ctx
     result = await asyncio.to_thread(_do_search, query)

@@ -9,15 +9,28 @@ from strix.tools._decorator import strix_tool
 
 @strix_tool(timeout=10)
 async def think(thought: str) -> str:
-    """Record a private chain-of-thought note without taking any action.
+    """Record a private chain-of-thought note. No side effects, no new info.
 
-    The "think" tool is the planning escape hatch for situations where a
-    message-without-tool-call would otherwise halt the run (per the
-    interactive-mode tool-call requirement). The thought itself is
-    recorded but produces no side effects.
+    Use ``think`` when you need a dedicated space to reason before acting —
+    not as an output channel. It's particularly valuable for:
+
+    - **Tool output analysis** — carefully processing the output of a
+      previous tool call before deciding the next step.
+    - **Policy-heavy environments** — when you need to follow detailed
+      guidelines (engagement scope, auth boundaries) and verify compliance
+      before each action.
+    - **Sequential decision making** — when each action builds on previous
+      ones and mistakes are costly (e.g., destructive operations,
+      irreversible auth changes).
+    - **Multi-step exploit planning** — breaking down a complex chain into
+      manageable steps and tracking what's been confirmed vs. assumed.
+
+    Structure your thought to be useful: current state, what you've
+    confirmed, your next planned actions, risk assessment. Don't use
+    ``think`` to chat — use it to plan.
 
     Args:
-        thought: The agent's reasoning to record. Must be non-empty.
+        thought: The reasoning to record. Must be non-empty.
     """
     if not thought or not thought.strip():
         return json.dumps({"success": False, "message": "Thought cannot be empty"})

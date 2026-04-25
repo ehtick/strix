@@ -333,11 +333,78 @@ async def create_vulnerability_report(
     cwe: str | None = None,
     code_locations: str | None = None,
 ) -> str:
-    """File a vulnerability report against the active scan.
+    """File a vulnerability report — one report per fully-verified finding.
 
-    The report is dedup-checked against existing reports (LLM-based
-    similarity); if it's a near-duplicate, the call returns a
-    ``duplicate_of`` pointer instead of creating a new entry.
+    **When to file**: you have a concrete vulnerability with a working
+    proof-of-concept and you're 100% sure it's a real issue.
+
+    **When NOT to file**:
+
+    - General security observations without a specific vulnerability.
+    - Suspicions you haven't confirmed with a PoC.
+    - Tracking multiple vulnerabilities at once — one report per vuln.
+    - Re-reporting something you (or another agent) already filed.
+
+    Automatic LLM-based **deduplication** rejects reports that describe
+    the same root cause on the same asset as an existing report. If you
+    get a ``duplicate_of`` response, do NOT retry — move on to other
+    areas.
+
+    **Customer-facing report rules** (the report is PDF-rendered for
+    delivery):
+
+    - No internal/system details: never mention paths like
+      ``/workspace``, internal tools, agents, sandboxes, models, system
+      prompts, internal errors / stack traces, or tester environment.
+    - Tone: formal, objective, third-person, vendor-neutral, concise.
+    - Standard finding structure: Overview → Severity & CVSS →
+      Affected assets → Technical details → PoC (steps + code) →
+      Impact → Remediation → Evidence (in technical_analysis).
+    - Numbered steps allowed only in PoC and Remediation sections.
+    - Avoid hedging language; be precise and non-vague.
+
+    **White-box requirement**: when source is available, you MUST
+    populate ``code_locations`` with nested XML including
+    ``fix_before`` / ``fix_after`` for proposed fixes. The fix_before
+    must be a verbatim copy of source at the specified line range — it's
+    used as a literal GitHub/GitLab PR suggestion block.
+
+    **CVSS breakdown** is required as nested XML with all 8 metrics
+    (each a single uppercase letter):
+
+    - ``attack_vector``: ``N`` (Network), ``A`` (Adjacent), ``L``
+      (Local), ``P`` (Physical)
+    - ``attack_complexity``: ``L`` / ``H``
+    - ``privileges_required``: ``N`` / ``L`` / ``H``
+    - ``user_interaction``: ``N`` / ``R``
+    - ``scope``: ``U`` (Unchanged) / ``C`` (Changed)
+    - ``confidentiality`` / ``integrity`` / ``availability``: ``N`` /
+      ``L`` / ``H``
+
+    **CVE / CWE rules**: pass the bare ID only (``CVE-2024-1234``,
+    ``CWE-89``) — no name, no parenthetical. Be 100% certain; if
+    unsure, omit. Always prefer the most specific child CWE over a
+    broad parent (CWE-89 not CWE-74; CWE-78 not CWE-77).
+
+    Args:
+        title: Specific finding title (e.g.
+            ``"SQL Injection in /api/users login parameter"``). Don't
+            include the CVE number in the title.
+        description: How the vuln was discovered + what it is.
+        impact: What an attacker achieves; business risk; data at risk.
+        target: Affected URL / domain / repository.
+        technical_analysis: The mechanism and root cause.
+        poc_description: Step-by-step reproduction.
+        poc_script_code: Working PoC (Python preferred).
+        remediation_steps: Specific, actionable fix.
+        cvss_breakdown: 8-metric XML block per the format above.
+        endpoint: API path / Git path (e.g. ``/api/login``).
+        method: HTTP method when relevant.
+        cve: ``CVE-YYYY-NNNNN`` if certain, else omit.
+        cwe: ``CWE-NNN`` (most specific child) if certain, else omit.
+        code_locations: Required for white-box findings; nested XML
+            list with ``file``, ``start_line``, ``end_line``,
+            ``snippet``, ``fix_before``, ``fix_after``.
     """
     del ctx
     result = await asyncio.to_thread(

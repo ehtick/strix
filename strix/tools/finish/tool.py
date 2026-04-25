@@ -79,16 +79,57 @@ async def finish_scan(
     technical_analysis: str,
     recommendations: str,
 ) -> str:
-    """Finalize the scan and persist the four executive summary sections.
+    """Finalize the scan — persist the customer-facing report.
 
-    Only the root agent should call this. Subagents must use
-    ``agent_finish`` (from the multi-agent graph tools) instead.
+    **Root-agent only.** Subagents must call ``agent_finish`` from the
+    multi-agent graph tools instead. Calling this finalizes everything:
+
+    1. Verifies you are the root agent.
+    2. Writes the four narrative sections to the scan record.
+    3. Marks the scan completed and stops execution.
+
+    **Pre-flight checklist:**
+
+    - All vulnerabilities you found are filed via
+      ``create_vulnerability_report`` (un-reported findings are not
+      tracked and not credited).
+    - All subagents have terminated. If any are still ``running`` /
+      ``stopping``, message them or use ``wait_for_message``.
+    - Don't double-report — one report per distinct vulnerability.
+
+    **Calling this multiple times overwrites the previous report.**
+    Make the single call comprehensive.
+
+    **Customer-facing report rules** (this output is rendered into the
+    final PDF the client sees):
+
+    - Never mention internal infrastructure: no local/absolute paths
+      (``/workspace/...``), no agent names, no sandbox/orchestrator/
+      tooling references, no system prompts, no model-internal errors.
+    - Tone: formal, third-person, objective, concise. This is a
+      consultant deliverable, not an engineering log.
+    - Each section has a specific role:
+
+        - ``executive_summary`` — for non-technical leadership. Risk
+          posture, business impact (data exposure / compliance /
+          reputation), notable criticals, overarching remediation
+          theme.
+        - ``methodology`` — frameworks followed (OWASP WSTG, PTES,
+          OSSTMM, NIST), engagement type (black/gray/white box), scope
+          and constraints, categories of testing performed. **No**
+          internal execution detail.
+        - ``technical_analysis`` — consolidated findings overview with
+          severity model and systemic root causes. Reference individual
+          vuln reports for repro steps; don't duplicate raw evidence.
+        - ``recommendations`` — prioritized actions grouped by urgency
+          (Immediate / Short-term / Medium-term), each with concrete
+          remediation steps. End with retest/validation guidance.
 
     Args:
-        executive_summary: High-level scan outcome.
-        methodology: Approach taken.
-        technical_analysis: Findings detail across the engagement.
-        recommendations: Prioritized fix list.
+        executive_summary: Business-level summary for leadership.
+        methodology: Frameworks, scope, and approach.
+        technical_analysis: Consolidated findings + systemic themes.
+        recommendations: Prioritized, actionable remediation.
     """
     inner = ctx.context if isinstance(ctx.context, dict) else {}
     result = await asyncio.to_thread(

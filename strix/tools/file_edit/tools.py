@@ -37,16 +37,34 @@ async def str_replace_editor(
     new_str: str | None = None,
     insert_line: int | None = None,
 ) -> str:
-    """View, create, or edit a file in the sandbox.
+    """View, create, or edit a file in the sandbox filesystem.
+
+    Commands:
+
+    - ``view`` — show file contents. Optionally restrict to a line range
+      via ``view_range`` (1-indexed; ``[start, -1]`` for "from start to
+      end of file").
+    - ``create`` — write a new file with ``file_text``. Use this for
+      exploit scripts, PoCs, helper modules, etc.
+    - ``str_replace`` — find ``old_str`` in the file and replace with
+      ``new_str``. ``old_str`` must be unique in the file; include
+      enough surrounding context to make it so.
+    - ``insert`` — insert ``new_str`` after line ``insert_line``.
+    - ``undo_edit`` — revert the most recent edit to ``path``.
+
+    Multi-line ``new_str`` / ``old_str`` / ``file_text`` use real
+    newlines, not literal ``\\n``.
 
     Args:
-        command: One of ``"view" | "create" | "str_replace" | "insert" |
-            "undo_edit"``.
-        path: File path. Relative paths are anchored at ``/workspace``.
+        command: ``view`` / ``create`` / ``str_replace`` / ``insert`` /
+            ``undo_edit``.
+        path: File path. Relative paths anchor at ``/workspace``.
         file_text: Required for ``create``.
-        view_range: Optional ``[start, end]`` line range for ``view``.
-        old_str / new_str: Required for ``str_replace``.
-        insert_line: Required for ``insert``.
+        view_range: Optional ``[start, end]`` (1-indexed) for ``view``.
+        old_str: Required for ``str_replace`` — must be unique in file.
+        new_str: Required for ``str_replace`` and ``insert``.
+        insert_line: Required for ``insert``; new content goes AFTER
+            this line.
     """
     return _dump(
         await post_to_sandbox(
@@ -73,9 +91,12 @@ async def list_files(
 ) -> str:
     """List files and directories under a sandbox path.
 
+    Output is sorted alphabetically and capped at 500 entries to avoid
+    flooding the model with huge directory trees.
+
     Args:
-        path: Directory path, relative paths anchored at ``/workspace``.
-        recursive: When True, walks subdirectories (capped at 500 entries).
+        path: Directory path; relative paths anchor at ``/workspace``.
+        recursive: When True, walks subdirectories.
     """
     return _dump(
         await post_to_sandbox(
@@ -93,12 +114,17 @@ async def search_files(
     regex: str,
     file_pattern: str = "*",
 ) -> str:
-    """Recursively grep files in the sandbox using ripgrep.
+    """Recursively regex-search files in the sandbox using ripgrep.
+
+    Fast — uses ``rg`` under the hood. Walks subdirectories. Use this
+    for code-pattern hunts (``def\\s+authenticate``, ``API_KEY``,
+    secrets, etc.) when you don't already know the file.
 
     Args:
-        path: Root path to search; relative paths anchored at ``/workspace``.
-        regex: Pattern to match (passed straight to ``rg``).
-        file_pattern: Glob filter (e.g. ``"*.py"``). Defaults to all files.
+        path: Root path to search. Relative paths anchor at ``/workspace``.
+        regex: Pattern to match (PCRE-style; passed straight to ``rg``).
+        file_pattern: Glob filter (e.g. ``"*.py"``, ``"*.{js,ts}"``).
+            Defaults to all files.
     """
     return _dump(
         await post_to_sandbox(

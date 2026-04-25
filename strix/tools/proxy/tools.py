@@ -50,15 +50,35 @@ async def list_requests(
     sort_order: SortOrder = "desc",
     scope_id: str | None = None,
 ) -> str:
-    """List captured HTTP requests from the Caido proxy.
+    """List captured HTTP requests from the Caido proxy with HTTPQL filtering.
+
+    Caido HTTPQL syntax (operators differ by field type):
+
+    - **Integer fields** (``resp.code``, ``req.port``, ``id``,
+      ``roundtrip``) — ``eq``, ``gt``, ``gte``, ``lt``, ``lte``, ``ne``.
+      Examples: ``resp.code.eq:200``, ``resp.code.gte:400``,
+      ``req.port.eq:443``.
+    - **Text/byte fields** (``req.method``, ``req.host``, ``req.path``,
+      ``req.query``, ``req.ext``, ``req.raw``) — ``regex``, ``cont``
+      (substring), ``eq``. Examples: ``req.method.eq:"POST"``,
+      ``req.path.cont:"/api/"``, ``req.host.regex:".*\\.example\\.com"``.
+    - **Date fields** (``req.created_at``) — ``gt``, ``lt`` with ISO
+      timestamps: ``req.created_at.gt:"2024-01-01T00:00:00Z"``.
+    - **Combine** with ``AND`` / ``OR``: ``req.method.eq:"POST" AND
+      resp.code.gte:400``.
+    - **Special**: ``source:intercept`` (only intercepted requests),
+      ``preset:"name"``.
 
     Args:
-        httpql_filter: Caido HTTPQL query (e.g. ``"resp.code:eq:500"``).
-        start_page / end_page: Inclusive page range to return.
-        page_size: Entries per page; default 50.
-        sort_by: Field to sort by.
-        sort_order: ``"asc"`` or ``"desc"``.
-        scope_id: Restrict to a specific scope.
+        httpql_filter: Caido HTTPQL query.
+        start_page: Starting page, 1-indexed.
+        end_page: Ending page (inclusive).
+        page_size: Entries per page (default 50).
+        sort_by: ``timestamp`` / ``host`` / ``method`` / ``path`` /
+            ``status_code`` / ``response_time`` / ``response_size`` /
+            ``source``.
+        sort_order: ``asc`` or ``desc``.
+        scope_id: Restrict to a scope (managed via ``scope_rules``).
     """
     return _dump(
         await post_to_sandbox(
@@ -86,7 +106,31 @@ async def view_request(
     page: int = 1,
     page_size: int = 50,
 ) -> str:
-    """View a single captured request or its response, with optional regex highlight."""
+    """View a captured request or its response, optionally regex-searched.
+
+    Two modes:
+
+    - **With** ``search_pattern`` (compact regex hits) — returns up to 20
+      matches with ``before`` / ``after`` context and position. Useful
+      for hunting reflected input, leaked URLs, hidden parameters.
+    - **Without** ``search_pattern`` (full content with pagination) —
+      returns the page of raw content plus ``has_more`` flag.
+
+    Common search patterns:
+
+    - API endpoints: ``/api/[a-zA-Z0-9._/-]+``
+    - URLs: ``https?://[^\\s<>"']+``
+    - Query parameters: ``[?&][a-zA-Z0-9_]+=([^&\\s<>"']+)``
+    - Specific input reflection: search for the value you submitted.
+
+    Args:
+        request_id: Request ID from ``list_requests``.
+        part: ``"request"`` or ``"response"``.
+        search_pattern: Optional regex; switches the response shape to
+            compact hits.
+        page: 1-indexed page number (only when no ``search_pattern``).
+        page_size: Lines per page.
+    """
     return _dump(
         await post_to_sandbox(
             ctx,
@@ -116,12 +160,17 @@ async def send_request(
 ) -> str:
     """Send an arbitrary HTTP request through the Caido proxy.
 
+    Use this for one-off probes (test endpoints, reach external APIs).
+    For modifying-and-replaying a request you've already captured, use
+    ``repeat_request`` instead — it inherits the original headers /
+    cookies / auth and only patches the fields you specify.
+
     Args:
-        method: ``"GET"``, ``"POST"``, etc.
-        url: Full URL.
+        method: ``"GET"`` / ``"POST"`` / ``"PUT"`` / ``"DELETE"`` / etc.
+        url: Full URL with protocol.
         headers: Optional header dict.
-        body: Optional body string.
-        timeout: Per-request timeout in seconds.
+        body: Optional request body string.
+        timeout: Per-request timeout in seconds (default 30).
     """
     return _dump(
         await post_to_sandbox(
@@ -147,7 +196,31 @@ async def repeat_request(
     request_id: str,
     modifications: dict[str, Any] | None = None,
 ) -> str:
-    """Repeat a captured request, optionally applying field modifications."""
+    """Repeat a captured request, optionally patching individual fields.
+
+    The standard pentesting workflow with this tool:
+
+    1. ``browser_action`` (or live target traffic) → request gets
+       captured by Caido.
+    2. ``list_requests`` → find the request ID you want to manipulate.
+    3. ``repeat_request`` → send a modified version (auth-bypass test,
+       payload injection, parameter tampering).
+
+    Mirrors the manual "browse → capture → modify → test" flow used in
+    real pentesting. Inherits everything from the original request
+    (headers, cookies, auth, method, URL) and overlays only the fields
+    you specify in ``modifications``.
+
+    Args:
+        request_id: ID of the original request (from ``list_requests``).
+        modifications: Patch dict. Recognized keys:
+
+            - ``url`` — replace the URL.
+            - ``params`` — dict of query-string keys to add/update.
+            - ``headers`` — dict of headers to add/update.
+            - ``body`` — replace the body string entirely.
+            - ``cookies`` — dict of cookies to add/update.
+    """
     return _dump(
         await post_to_sandbox(
             ctx,
@@ -169,7 +242,44 @@ async def scope_rules(
     scope_id: str | None = None,
     scope_name: str | None = None,
 ) -> str:
-    """CRUD on Caido scope rules (allow/deny lists)."""
+    """CRUD on Caido scope rules (allow/deny patterns).
+
+    Scopes filter which traffic Caido tools see. Use them to focus on a
+    target, exclude noisy assets (CDNs, static files), or define a
+    bug-bounty allowlist.
+
+    Pattern semantics:
+
+    - Glob wildcards: ``*`` (any), ``?`` (single), ``[abc]`` (one of),
+      ``[a-z]`` (range), ``[^abc]`` (none of).
+    - **Empty allowlist = allow all domains.**
+    - **Denylist always overrides allowlist.**
+
+    Common denylist for noisy static assets:
+    ``["*.gif", "*.jpg", "*.png", "*.css", "*.js", "*.ico", "*.svg",
+    "*woff*", "*.ttf"]``.
+
+    Each scope has a unique id usable as ``scope_id`` in
+    ``list_requests`` / ``list_sitemap`` / ``view_request``.
+
+    Args:
+        action:
+
+            - ``list`` — return all scopes.
+            - ``get`` — single scope by ``scope_id`` (or all when
+              omitted).
+            - ``create`` — needs ``scope_name``, optionally
+              ``allowlist`` / ``denylist``.
+            - ``update`` — needs ``scope_id`` + ``scope_name``;
+              allowlist / denylist replace the previous values.
+            - ``delete`` — needs ``scope_id``.
+
+        allowlist: Domain patterns to include (e.g.
+            ``["*.example.com", "api.test.com"]``).
+        denylist: Patterns to exclude.
+        scope_id: Required for ``get`` / ``update`` / ``delete``.
+        scope_name: Required for ``create`` / ``update``.
+    """
     return _dump(
         await post_to_sandbox(
             ctx,
@@ -193,13 +303,30 @@ async def list_sitemap(
     depth: SitemapDepth = "DIRECT",
     page: int = 1,
 ) -> str:
-    """List Caido sitemap entries (proxied URL tree).
+    """View the hierarchical sitemap of discovered attack surface.
+
+    The sitemap is built from proxied traffic — every URL the target
+    served gets indexed into a tree of domains → directories → request
+    leaves. Use it to understand application structure and find
+    interesting endpoints, hidden directories, parameter variations.
+
+    Entry kinds you'll encounter:
+
+    - ``DOMAIN`` — root host (``example.com``).
+    - ``DIRECTORY`` — path segment (``/api/``, ``/admin/``).
+    - ``REQUEST`` — a specific endpoint.
+    - ``REQUEST_BODY`` — POST/PUT body variations (different payloads
+      seen at the same URL).
+    - ``REQUEST_QUERY`` — query-string variations.
+
+    Each entry has ``hasDescendants`` — set ``parent_id`` to that
+    entry's id to drill in. Pages return 30 entries each.
 
     Args:
-        scope_id: Restrict to a scope.
-        parent_id: Drill into a specific subtree.
-        depth: ``"DIRECT"`` (direct children only) or ``"ALL"`` (recursive).
-        page: 1-indexed page number.
+        scope_id: Filter to a specific scope.
+        parent_id: Drill into a subtree. ``None`` returns root domains.
+        depth: ``"DIRECT"`` (immediate children) or ``"ALL"`` (recursive).
+        page: 1-indexed page (30 entries/page).
     """
     return _dump(
         await post_to_sandbox(
@@ -217,7 +344,15 @@ async def list_sitemap(
 
 @strix_tool(timeout=60)
 async def view_sitemap_entry(ctx: RunContextWrapper, entry_id: str) -> str:
-    """Fetch a single sitemap entry's metadata + linked requests."""
+    """Examine one sitemap entry — full metadata + every related request.
+
+    Use this after ``list_sitemap`` identifies an interesting directory
+    or endpoint to see all the requests captured under it (methods,
+    paths, response codes, timing).
+
+    Args:
+        entry_id: Sitemap entry id from ``list_sitemap``.
+    """
     return _dump(
         await post_to_sandbox(ctx, "view_sitemap_entry", {"entry_id": entry_id}),
     )

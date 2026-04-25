@@ -211,7 +211,33 @@ async def create_todo(
     priority: str = "normal",
     todos: str | None = None,
 ) -> str:
-    """Create one or many todos for the current agent."""
+    """Create one or many todos for the current agent.
+
+    Each agent (including subagents) has its **own private todo list** —
+    your todos don't leak to other agents and vice versa.
+
+    When to use:
+
+    - Planning multi-step assessments with parallel workstreams.
+    - Tracking work you'll come back to later.
+    - Breaking down complex scopes (per-endpoint, per-target, per-vuln-class).
+
+    When NOT to use:
+
+    - Simple linear workflows where progress is obvious.
+    - Single quick task — just do it.
+
+    Batch related todos in one call via the ``todos`` bulk parameter
+    rather than firing many ``create_todo`` calls.
+
+    Args:
+        title: Short, actionable title (e.g., "Test /api/admin for IDOR").
+        description: Optional details / context for the single todo.
+        priority: ``"low"`` / ``"normal"`` / ``"high"`` / ``"critical"``.
+        todos: Bulk create — either JSON array of
+            ``{"title": "...", "description": "...", "priority": "..."}``
+            objects, or a newline-separated bullet list (``- item\\n- item``).
+    """
     agent_id = _agent_id_from(ctx)
     try:
         default_priority = _normalize_priority(priority)
@@ -271,7 +297,16 @@ async def list_todos(
     status: str | None = None,
     priority: str | None = None,
 ) -> str:
-    """List the current agent's todos, sorted by status then priority."""
+    """List the current agent's todos, sorted by status then priority.
+
+    Sort order: status (done → in_progress → pending), then priority
+    within each status (critical → high → normal → low).
+
+    Args:
+        status: Filter — ``"pending"`` / ``"in_progress"`` / ``"done"``.
+        priority: Filter — ``"low"`` / ``"normal"`` / ``"high"`` /
+            ``"critical"``.
+    """
     agent_id = _agent_id_from(ctx)
     try:
         agent_todos = _get_agent_todos(agent_id)
@@ -333,7 +368,19 @@ async def update_todo(
     status: str | None = None,
     updates: str | None = None,
 ) -> str:
-    """Update one or many todos."""
+    """Update one or many todos. Prefer the bulk form for multiple updates.
+
+    For toggling status only, use the dedicated ``mark_todo_done`` /
+    ``mark_todo_pending`` tools — they're simpler and accept bulk
+    ``todo_ids``.
+
+    Args:
+        todo_id: Single-todo target.
+        title / description / priority / status: New values for the
+            single todo. Omit to leave unchanged.
+        updates: Bulk form — JSON array like
+            ``[{"todo_id": "abc", "status": "done"}, ...]``.
+    """
     agent_id = _agent_id_from(ctx)
     try:
         agent_todos = _get_agent_todos(agent_id)
@@ -437,7 +484,13 @@ async def mark_todo_done(
     todo_id: str | None = None,
     todo_ids: str | None = None,
 ) -> str:
-    """Mark one (``todo_id``) or many (``todo_ids``) todos as done."""
+    """Mark one or many todos as done.
+
+    Args:
+        todo_id: Single todo's ID.
+        todo_ids: Bulk form — JSON array, comma-separated string, or
+            single ID. Combinable with ``todo_id`` for one-off plus bulk.
+    """
     return _mark(
         agent_id=_agent_id_from(ctx),
         todo_id=todo_id,
@@ -452,7 +505,12 @@ async def mark_todo_pending(
     todo_id: str | None = None,
     todo_ids: str | None = None,
 ) -> str:
-    """Mark one (``todo_id``) or many (``todo_ids``) todos as pending."""
+    """Reset one or many todos to pending (e.g., to retry a failed task).
+
+    Args:
+        todo_id: Single todo's ID.
+        todo_ids: Bulk form — JSON array, comma-separated, or single ID.
+    """
     return _mark(
         agent_id=_agent_id_from(ctx),
         todo_id=todo_id,
@@ -467,7 +525,12 @@ async def delete_todo(
     todo_id: str | None = None,
     todo_ids: str | None = None,
 ) -> str:
-    """Delete one (``todo_id``) or many (``todo_ids``) todos."""
+    """Delete one or many todos. Removes them entirely (no soft-delete).
+
+    Args:
+        todo_id: Single todo's ID.
+        todo_ids: Bulk form — JSON array, comma-separated, or single ID.
+    """
     agent_id = _agent_id_from(ctx)
     try:
         agent_todos = _get_agent_todos(agent_id)

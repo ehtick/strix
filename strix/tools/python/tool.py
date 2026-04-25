@@ -31,13 +31,53 @@ async def python_action(
     timeout: int = 30,
     session_id: str | None = None,
 ) -> str:
-    """Manage / execute code in a long-lived sandboxed IPython session.
+    """Run Python code in a long-lived IPython session — preferred for any
+    Python work (payloads, exploit scripts, HTTP automation, log analysis,
+    crypto, data processing).
+
+    Pick this over ``terminal_execute`` whenever the work is Python.
+    Don't wrap Python in bash heredocs, ``python -c`` one-liners, or
+    interactive REPL sessions in the terminal — the structured,
+    persistent, debuggable execution lives here.
+
+    Sessions are **persistent** — variables, imports, and function
+    definitions survive between ``execute`` calls within the same
+    ``session_id``. Each session has its own isolated namespace; multiple
+    sessions can run concurrently. Sessions stay alive until explicitly
+    ``close``-d.
+
+    Caido proxy helpers are pre-imported into every session, so you can
+    correlate captured HTTP requests with custom analysis without any
+    setup: ``list_requests`` / ``view_request`` / ``send_request`` /
+    ``repeat_request`` / ``scope_rules`` / ``list_sitemap`` /
+    ``view_sitemap_entry`` are all available as bare names.
+
+    For large payload sprays / fuzzing loops, encapsulate the entire
+    loop inside a single ``python_action`` ``execute`` call (e.g.,
+    asyncio + aiohttp). Don't issue one tool call per payload — that
+    burns turns and is dramatically slower.
+
+    Code execution notes:
+
+    - Both expressions and statements are supported. Expressions auto-
+      return their result; ``print`` output is captured to stdout.
+    - IPython magics work: ``%pip install ...``, ``%time``, ``%whos``,
+      ``%%writefile``, etc.
+    - Use real newlines in multi-line ``code``, not literal ``\\n``.
+
+    Workflow:
+
+    1. ``new_session`` (always first per ``session_id``) — optionally
+       pass ``code`` for an initial setup snippet (imports, helpers).
+    2. ``execute`` — run code. Variables persist across calls.
+    3. ``close`` — terminate the session and free memory.
+    4. ``list_sessions`` — inspect what's currently alive.
 
     Args:
-        action: ``"new_session"`` to spin one up, ``"execute"`` to run code,
-            ``"close"`` to terminate, ``"list_sessions"`` to inspect.
-        code: Required for ``execute`` (and optional for ``new_session``
-            to run a setup snippet immediately).
+        action: ``"new_session"`` / ``"execute"`` / ``"close"`` /
+            ``"list_sessions"``.
+        code: Required for ``execute``; optional initial code for
+            ``new_session``.
         timeout: Per-call execution budget in seconds. Default 30.
         session_id: Required for ``execute`` / ``close``. Optional for
             ``new_session`` (auto-generated when omitted).

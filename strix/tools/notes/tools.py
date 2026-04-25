@@ -425,11 +425,37 @@ async def create_note(
     category: str = "general",
     tags: list[str] | None = None,
 ) -> str:
-    """Create a note in the current run's notes store.
+    """Document an observation, finding, methodology step, or research note.
 
-    Notes are persisted to ``run_dir/notes/notes.jsonl`` and (for the
-    ``wiki`` category) rendered as Markdown to
-    ``run_dir/wiki/<slug>.md``.
+    Notes are your **shared run memory** — they're visible to every
+    agent in the same scan and persist to ``run_dir/notes/notes.jsonl``
+    (replayable event log). Wiki-category notes are additionally
+    rendered as Markdown under ``run_dir/wiki/<slug>.md``.
+
+    For actionable tasks, use ``todo`` instead — notes are for capturing
+    information, todos are for tracking work.
+
+    Categories:
+
+    - ``general`` — default, anything that doesn't fit elsewhere.
+    - ``findings`` — confirmed vulnerabilities or weaknesses (write
+      these up promptly; you'll cite them when filing reports).
+    - ``methodology`` — what you tried, what worked, what didn't —
+      useful for the final scan report.
+    - ``questions`` — open questions / things to come back to.
+    - ``plan`` — multi-step plans you want to track.
+    - ``wiki`` — repository or target source maps shared across agents
+      in the same run. Use this for codebase architecture notes the
+      whole agent tree should see.
+
+    Tags are free-form (e.g. ``["sqli", "auth", "critical"]``) — useful
+    for later ``list_notes(tags=...)`` filtering.
+
+    Args:
+        title: Short headline.
+        content: Full note body. Markdown is preserved.
+        category: One of the categories above. Default ``"general"``.
+        tags: Optional free-form tags.
     """
     del ctx
     return _dump(
@@ -445,7 +471,24 @@ async def list_notes(
     search: str | None = None,
     include_content: bool = False,
 ) -> str:
-    """List notes, optionally filtered by category / tags / substring."""
+    """List existing notes — metadata-first by default.
+
+    Filters compose: passing ``category="findings"`` and
+    ``tags=["sqli"]`` returns notes that are *both* in the findings
+    category AND have at least one of those tags.
+
+    By default each entry includes a ``content_preview`` (first 280
+    chars). Set ``include_content=True`` to get full bodies — useful
+    when you need to scan many notes; expensive in tokens for large
+    notes.
+
+    Args:
+        category: Filter by category.
+        tags: Filter to notes that have any of these tags.
+        search: Substring match against title and content.
+        include_content: When False (default) entries have a preview;
+            when True the full ``content`` is included.
+    """
     del ctx
     return _dump(
         await asyncio.to_thread(
@@ -460,7 +503,11 @@ async def list_notes(
 
 @strix_tool(timeout=30)
 async def get_note(ctx: RunContextWrapper, note_id: str) -> str:
-    """Fetch one note by its 5-char ID. Returns full content."""
+    """Fetch one note by its 5-char ID. Returns the full content.
+
+    Args:
+        note_id: Note id from ``create_note`` or a ``list_notes`` entry.
+    """
     del ctx
     return _dump(await asyncio.to_thread(_get_note_impl, note_id))
 
@@ -473,7 +520,18 @@ async def update_note(
     content: str | None = None,
     tags: list[str] | None = None,
 ) -> str:
-    """Update a note's title, content, or tags."""
+    """Update a note's title, content, or tags.
+
+    Pass ``None`` for any field you want left unchanged. Replacing
+    ``content`` is a full overwrite — to append, fetch first with
+    ``get_note``, concat, and pass the result.
+
+    Args:
+        note_id: Target note's 5-char ID.
+        title: New title, or ``None`` to keep.
+        content: New content, or ``None`` to keep.
+        tags: New tags list, or ``None`` to keep.
+    """
     del ctx
     return _dump(
         await asyncio.to_thread(
@@ -488,6 +546,10 @@ async def update_note(
 
 @strix_tool(timeout=30)
 async def delete_note(ctx: RunContextWrapper, note_id: str) -> str:
-    """Delete a note. For wiki notes, also removes the rendered Markdown file."""
+    """Delete a note. For wiki notes, also removes the rendered Markdown file.
+
+    Args:
+        note_id: Note id to delete.
+    """
     del ctx
     return _dump(await asyncio.to_thread(_delete_note_impl, note_id))
