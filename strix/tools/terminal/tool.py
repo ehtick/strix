@@ -7,17 +7,10 @@ host-side wrapper is a thin pass-through.
 
 from __future__ import annotations
 
-import json
-from typing import Any
-
 from agents import RunContextWrapper
 
-from strix.tools._decorator import strix_tool
+from strix.tools._decorator import dump_tool_result, strix_tool
 from strix.tools._sandbox_dispatch import post_to_sandbox
-
-
-def _dump(result: dict[str, Any]) -> str:
-    return json.dumps(result, ensure_ascii=False, default=str)
 
 
 @strix_tool(timeout=180)
@@ -92,7 +85,7 @@ async def terminal_execute(
             concurrent sessions.
         no_enter: When True, sends keystrokes without a trailing return.
     """
-    return _dump(
+    return dump_tool_result(
         await post_to_sandbox(
             ctx,
             "terminal_execute",

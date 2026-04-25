@@ -15,7 +15,7 @@ from typing import Any
 
 from agents import RunContextWrapper
 
-from strix.tools._decorator import strix_tool
+from strix.tools._decorator import dump_tool_result, strix_tool
 
 
 VALID_PRIORITIES = ["low", "normal", "high", "critical"]
@@ -37,10 +37,6 @@ def _todo_sort_key(todo: dict[str, Any]) -> tuple[int, int, str]:
 # Keyed by ``ctx.context['agent_id']`` so two agents in the same scan
 # don't see each other's lists.
 _todos_storage: dict[str, dict[str, dict[str, Any]]] = {}
-
-
-def _dump(result: dict[str, Any]) -> str:
-    return json.dumps(result, ensure_ascii=False, default=str)
 
 
 def _agent_id_from(ctx: RunContextWrapper) -> str:
@@ -252,7 +248,7 @@ async def create_todo(
                 },
             )
         if not tasks:
-            return _dump(
+            return dump_tool_result(
                 {
                     "success": False,
                     "error": "Provide a title or 'todos' list to create.",
@@ -277,9 +273,11 @@ async def create_todo(
             }
             created.append({"todo_id": todo_id, "title": task["title"], "priority": task_priority})
     except (ValueError, TypeError) as e:
-        return _dump({"success": False, "error": f"Failed to create todo: {e}", "todo_id": None})
+        return dump_tool_result(
+            {"success": False, "error": f"Failed to create todo: {e}", "todo_id": None}
+        )
 
-    return _dump(
+    return dump_tool_result(
         {
             "success": True,
             "created": created,
@@ -329,7 +327,7 @@ async def list_todos(
             sv = todo.get("status", "pending")
             summary[sv] = summary.get(sv, 0) + 1
     except (ValueError, TypeError) as e:
-        return _dump(
+        return dump_tool_result(
             {
                 "success": False,
                 "error": f"Failed to list todos: {e}",
@@ -339,7 +337,7 @@ async def list_todos(
             },
         )
 
-    return _dump(
+    return dump_tool_result(
         {
             "success": True,
             "todos": todos_list,
@@ -389,7 +387,7 @@ async def update_todo(
                 },
             )
         if not updates_to_apply:
-            return _dump(
+            return dump_tool_result(
                 {"success": False, "error": "Provide todo_id or 'updates' list to update."},
             )
 
@@ -409,7 +407,7 @@ async def update_todo(
             else:
                 updated.append(upd["todo_id"])
     except (ValueError, TypeError) as e:
-        return _dump({"success": False, "error": str(e)})
+        return dump_tool_result({"success": False, "error": str(e)})
 
     response: dict[str, Any] = {
         "success": len(errors) == 0,
@@ -420,7 +418,7 @@ async def update_todo(
     }
     if errors:
         response["errors"] = errors
-    return _dump(response)
+    return dump_tool_result(response)
 
 
 def _mark(
@@ -439,7 +437,7 @@ def _mark(
             ids.append(todo_id)
         if not ids:
             msg = f"Provide todo_id or todo_ids to mark as {new_status}."
-            return _dump({"success": False, "error": msg})
+            return dump_tool_result({"success": False, "error": msg})
 
         marked: list[str] = []
         errors: list[dict[str, Any]] = []
@@ -454,7 +452,7 @@ def _mark(
             todo["updated_at"] = timestamp
             marked.append(tid)
     except (ValueError, TypeError) as e:
-        return _dump({"success": False, "error": str(e)})
+        return dump_tool_result({"success": False, "error": str(e)})
 
     key = "marked_done" if new_status == "done" else "marked_pending"
     response: dict[str, Any] = {
@@ -466,7 +464,7 @@ def _mark(
     }
     if errors:
         response["errors"] = errors
-    return _dump(response)
+    return dump_tool_result(response)
 
 
 @strix_tool(timeout=30)
@@ -531,7 +529,9 @@ async def delete_todo(
         if todo_id is not None:
             ids.append(todo_id)
         if not ids:
-            return _dump({"success": False, "error": "Provide todo_id or todo_ids to delete."})
+            return dump_tool_result(
+                {"success": False, "error": "Provide todo_id or todo_ids to delete."}
+            )
 
         deleted: list[str] = []
         errors: list[dict[str, Any]] = []
@@ -542,7 +542,7 @@ async def delete_todo(
             del agent_todos[tid]
             deleted.append(tid)
     except (ValueError, TypeError) as e:
-        return _dump({"success": False, "error": str(e)})
+        return dump_tool_result({"success": False, "error": str(e)})
 
     response: dict[str, Any] = {
         "success": len(errors) == 0,
@@ -553,4 +553,4 @@ async def delete_todo(
     }
     if errors:
         response["errors"] = errors
-    return _dump(response)
+    return dump_tool_result(response)

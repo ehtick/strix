@@ -13,17 +13,12 @@ the model.
 
 from __future__ import annotations
 
-import json
-from typing import Any, Literal
+from typing import Literal
 
 from agents import RunContextWrapper
 
-from strix.tools._decorator import strix_tool
+from strix.tools._decorator import dump_tool_result, strix_tool
 from strix.tools._sandbox_dispatch import post_to_sandbox
-
-
-def _dump(result: dict[str, Any]) -> str:
-    return json.dumps(result, ensure_ascii=False, default=str)
 
 
 BrowserAction = Literal[
@@ -137,7 +132,7 @@ async def browser_action(
         clear: For ``get_console_logs``, clear logs after retrieval
             (default False).
     """
-    return _dump(
+    return dump_tool_result(
         await post_to_sandbox(
             ctx,
             "browser_action",

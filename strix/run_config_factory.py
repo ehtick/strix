@@ -28,41 +28,26 @@ if TYPE_CHECKING:
     from strix.orchestration.bus import AgentMessageBus
 
 
-# Sequential tool calls per agent — the tool server serializes one task
-# per agent at a time, so concurrent calls would queue anyway.
-_PARALLEL_TOOL_CALLS_DEFAULT = False
-
-# Retry policy. 401/403/400 are deliberately excluded — auth and
-# validation errors can't be fixed by retrying and should fail fast.
-_RETRYABLE_HTTP_STATUSES = (429, 500, 502, 503, 504)
-
-# Default retry budget: 5 attempts with ``min(90, 2*2^n)`` backoff.
-_DEFAULT_MAX_RETRIES = 5
-_DEFAULT_BACKOFF = ModelRetryBackoffSettings(
-    initial_delay=2.0,
-    max_delay=90.0,
-    multiplier=2.0,
-    jitter=False,
-)
-
-
-def _default_retry_policy() -> Any:
-    """Build the default retry policy.
-
-    Built from ``retry_policies.any(...)``: any of the listed conditions
-    triggers a retry. ``provider_suggested`` honors server-sent
-    ``Retry-After`` hints; ``network_error`` covers connection / timeout;
-    ``http_status`` whitelists transient HTTP codes.
-    """
-    return retry_policies.any(
-        retry_policies.provider_suggested(),
-        retry_policies.network_error(),
-        retry_policies.http_status(_RETRYABLE_HTTP_STATUSES),
-    )
-
-
 #: Default ``max_turns`` callers should pass to ``Runner.run``.
 STRIX_DEFAULT_MAX_TURNS = 300
+
+# Retry: 5 attempts with ``min(90, 2*2^n)`` backoff. 4xx auth/validation
+# errors are excluded from the retryable status list — they can't be
+# fixed by retrying and should fail fast.
+_DEFAULT_RETRY = ModelRetrySettings(
+    max_retries=5,
+    backoff=ModelRetryBackoffSettings(
+        initial_delay=2.0,
+        max_delay=90.0,
+        multiplier=2.0,
+        jitter=False,
+    ),
+    policy=retry_policies.any(
+        retry_policies.provider_suggested(),
+        retry_policies.network_error(),
+        retry_policies.http_status((429, 500, 502, 503, 504)),
+    ),
+)
 
 
 def make_run_config(
@@ -95,13 +80,9 @@ def make_run_config(
             supplied without a client.
     """
     base_settings = ModelSettings(
-        parallel_tool_calls=_PARALLEL_TOOL_CALLS_DEFAULT,
+        parallel_tool_calls=False,
         tool_choice="required",
-        retry=ModelRetrySettings(
-            max_retries=_DEFAULT_MAX_RETRIES,
-            backoff=_DEFAULT_BACKOFF,
-            policy=_default_retry_policy(),
-        ),
+        retry=_DEFAULT_RETRY,
     )
     if reasoning_effort is not None:
         base_settings = base_settings.resolve(

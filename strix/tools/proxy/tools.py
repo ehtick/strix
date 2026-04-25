@@ -10,17 +10,12 @@ scope_rules, list_sitemap, view_sitemap_entry.
 
 from __future__ import annotations
 
-import json
 from typing import Any, Literal
 
 from agents import RunContextWrapper
 
-from strix.tools._decorator import strix_tool
+from strix.tools._decorator import dump_tool_result, strix_tool
 from strix.tools._sandbox_dispatch import post_to_sandbox
-
-
-def _dump(result: dict[str, Any]) -> str:
-    return json.dumps(result, ensure_ascii=False, default=str)
 
 
 RequestPart = Literal["request", "response"]
@@ -80,7 +75,7 @@ async def list_requests(
         sort_order: ``asc`` or ``desc``.
         scope_id: Restrict to a scope (managed via ``scope_rules``).
     """
-    return _dump(
+    return dump_tool_result(
         await post_to_sandbox(
             ctx,
             "list_requests",
@@ -131,7 +126,7 @@ async def view_request(
         page: 1-indexed page number (only when no ``search_pattern``).
         page_size: Lines per page.
     """
-    return _dump(
+    return dump_tool_result(
         await post_to_sandbox(
             ctx,
             "view_request",
@@ -172,7 +167,7 @@ async def send_request(
         body: Optional request body string.
         timeout: Per-request timeout in seconds (default 30).
     """
-    return _dump(
+    return dump_tool_result(
         await post_to_sandbox(
             ctx,
             "send_request",
@@ -221,7 +216,7 @@ async def repeat_request(
             - ``body`` — replace the body string entirely.
             - ``cookies`` — dict of cookies to add/update.
     """
-    return _dump(
+    return dump_tool_result(
         await post_to_sandbox(
             ctx,
             "repeat_request",
@@ -280,7 +275,7 @@ async def scope_rules(
         scope_id: Required for ``get`` / ``update`` / ``delete``.
         scope_name: Required for ``create`` / ``update``.
     """
-    return _dump(
+    return dump_tool_result(
         await post_to_sandbox(
             ctx,
             "scope_rules",
@@ -328,7 +323,7 @@ async def list_sitemap(
         depth: ``"DIRECT"`` (immediate children) or ``"ALL"`` (recursive).
         page: 1-indexed page (30 entries/page).
     """
-    return _dump(
+    return dump_tool_result(
         await post_to_sandbox(
             ctx,
             "list_sitemap",
@@ -353,6 +348,6 @@ async def view_sitemap_entry(ctx: RunContextWrapper, entry_id: str) -> str:
     Args:
         entry_id: Sitemap entry id from ``list_sitemap``.
     """
-    return _dump(
+    return dump_tool_result(
         await post_to_sandbox(ctx, "view_sitemap_entry", {"entry_id": entry_id}),
     )

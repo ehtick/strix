@@ -7,17 +7,12 @@ across multiple ``execute`` calls. Pure pass-through wrapper.
 
 from __future__ import annotations
 
-import json
-from typing import Any, Literal
+from typing import Literal
 
 from agents import RunContextWrapper
 
-from strix.tools._decorator import strix_tool
+from strix.tools._decorator import dump_tool_result, strix_tool
 from strix.tools._sandbox_dispatch import post_to_sandbox
-
-
-def _dump(result: dict[str, Any]) -> str:
-    return json.dumps(result, ensure_ascii=False, default=str)
 
 
 PythonAction = Literal["new_session", "execute", "close", "list_sessions"]
@@ -82,7 +77,7 @@ async def python_action(
         session_id: Required for ``execute`` / ``close``. Optional for
             ``new_session`` (auto-generated when omitted).
     """
-    return _dump(
+    return dump_tool_result(
         await post_to_sandbox(
             ctx,
             "python_action",

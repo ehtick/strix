@@ -14,6 +14,7 @@ Defaults:
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from typing import Any, Literal
 
@@ -23,6 +24,16 @@ from agents.tool import FunctionTool
 
 _ToolFn = Callable[..., Any]
 _ToolBehavior = Literal["error_as_result", "raise_exception"]
+
+
+def dump_tool_result(result: dict[str, Any]) -> str:
+    """Serialize a tool's dict result to JSON for the LLM.
+
+    Every Strix tool returns a dict; the SDK passes the tool's return
+    straight into ``str(result)``, which produces ugly Python repr
+    output. JSON is what the model expects.
+    """
+    return json.dumps(result, ensure_ascii=False, default=str)
 
 
 def strix_tool(

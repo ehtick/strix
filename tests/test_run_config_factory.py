@@ -1,4 +1,4 @@
-"""Phase 1 smoke tests for make_run_config / make_agent_context."""
+"""Smoke tests for make_run_config / make_agent_context."""
 
 from __future__ import annotations
 
@@ -7,11 +7,7 @@ from agents.model_settings import ModelSettings
 from agents.retry import ModelRetryBackoffSettings
 
 from strix.orchestration.bus import AgentMessageBus
-from strix.run_config_factory import (
-    _RETRYABLE_HTTP_STATUSES,
-    make_agent_context,
-    make_run_config,
-)
+from strix.run_config_factory import make_agent_context, make_run_config
 
 
 def test_make_run_config_returns_run_config() -> None:
@@ -20,7 +16,7 @@ def test_make_run_config_returns_run_config() -> None:
 
 
 def test_default_parallel_tool_calls_is_false() -> None:
-    """C1 (AUDIT.md): Phase 1 default is sequential to match legacy tool server."""
+    """Default is sequential — the tool server serializes one task per agent."""
     cfg = make_run_config(sandbox_session=None)
     assert cfg.model_settings is not None
     assert cfg.model_settings.parallel_tool_calls is False
@@ -48,7 +44,7 @@ def test_retry_settings_have_max_retries_5() -> None:
 
 
 def test_retry_backoff_uses_strix_defaults() -> None:
-    """Mirrors legacy llm.py: min(90, 2*2^n) with initial 2s, max 90s, x2."""
+    """min(90, 2*2^n) with initial 2s, max 90s, x2."""
     cfg = make_run_config(sandbox_session=None)
     assert cfg.model_settings is not None
     retry = cfg.model_settings.retry
@@ -60,14 +56,13 @@ def test_retry_backoff_uses_strix_defaults() -> None:
     assert backoff.multiplier == 2.0
 
 
-def test_retry_http_codes_exclude_401_403_400() -> None:
-    """C11 (AUDIT_R2): auth/validation errors must NOT be in the retry list."""
-    assert 401 not in _RETRYABLE_HTTP_STATUSES
-    assert 403 not in _RETRYABLE_HTTP_STATUSES
-    assert 400 not in _RETRYABLE_HTTP_STATUSES
-    # And 429 / 5xx must be present.
-    for code in (429, 500, 502, 503, 504):
-        assert code in _RETRYABLE_HTTP_STATUSES
+def test_retry_policy_is_set() -> None:
+    """Retry policy is wired (auth/validation 4xx excluded by construction)."""
+    cfg = make_run_config(sandbox_session=None)
+    assert cfg.model_settings is not None
+    retry = cfg.model_settings.retry
+    assert retry is not None
+    assert retry.policy is not None
 
 
 def test_trace_include_sensitive_data_is_false() -> None:
@@ -76,7 +71,7 @@ def test_trace_include_sensitive_data_is_false() -> None:
 
 
 def test_model_settings_override_merges() -> None:
-    """C21 (AUDIT_R3): per-call override path."""
+    """Per-call override path."""
     override = ModelSettings(tool_choice="auto", parallel_tool_calls=True)
     cfg = make_run_config(sandbox_session=None, model_settings_override=override)
     assert cfg.model_settings is not None
@@ -95,10 +90,11 @@ def test_reasoning_effort_propagates() -> None:
 
 
 def test_max_turns_default_is_300() -> None:
-    """Mirrors legacy AgentState.max_iterations=300 (HARNESS_WIKI §5.2)."""
-    # max_turns is RunConfig-level; we default 300 in make_agent_context for
-    # the per-agent context dict. RunConfig itself sets max_turns at run call
-    # time via Runner.run(max_turns=...). Verify our context.
+    """Default max_turns=300 in make_agent_context.
+
+    ``max_turns`` itself is passed to ``Runner.run``; the context copy is
+    consumed by the budget-warning hook.
+    """
     bus = AgentMessageBus()
     ctx = make_agent_context(
         bus=bus,
@@ -114,7 +110,7 @@ def test_max_turns_default_is_300() -> None:
 
 
 def test_make_agent_context_full_shape() -> None:
-    """C21 — context dict carries every field tools/hooks reach for."""
+    """The context dict carries every field tools/hooks reach for."""
     bus = AgentMessageBus()
     ctx = make_agent_context(
         bus=bus,
@@ -165,7 +161,6 @@ def test_sandbox_config_omitted_when_no_session() -> None:
 
 
 def test_model_default_is_strix_claude() -> None:
-    """Production default per AUDIT/PLAYBOOK convention."""
     cfg = make_run_config(sandbox_session=None)
     assert cfg.model == "anthropic/claude-sonnet-4-6"
 

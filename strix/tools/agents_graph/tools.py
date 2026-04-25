@@ -26,7 +26,7 @@ from agents.items import TResponseInputItem
 
 from strix.orchestration.hooks import StrixOrchestrationHooks
 from strix.run_config_factory import make_agent_context, make_run_config
-from strix.tools._decorator import strix_tool
+from strix.tools._decorator import dump_tool_result, strix_tool
 
 
 if TYPE_CHECKING:
@@ -36,10 +36,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-
-def _dump(result: dict[str, Any]) -> str:
-    return json.dumps(result, ensure_ascii=False, default=str)
 
 
 def _ctx(ctx: RunContextWrapper) -> dict[str, Any]:
@@ -61,7 +57,7 @@ async def view_agent_graph(ctx: RunContextWrapper) -> str:
     bus = inner.get("bus")
     me = inner.get("agent_id")
     if bus is None:
-        return _dump({"success": False, "error": "Bus not initialized in context."})
+        return dump_tool_result({"success": False, "error": "Bus not initialized in context."})
 
     async with bus._lock:
         parent_of = dict(bus.parent_of)
@@ -90,7 +86,7 @@ async def view_agent_graph(ctx: RunContextWrapper) -> str:
         "crashed": sum(1 for s in statuses.values() if s == "crashed"),
         "stopped": sum(1 for s in statuses.values() if s == "stopped"),
     }
-    return _dump(
+    return dump_tool_result(
         {
             "success": True,
             "graph_structure": "\n".join(lines) or "(no agents)",
@@ -115,17 +111,17 @@ async def agent_status(ctx: RunContextWrapper, agent_id: str) -> str:
     inner = _ctx(ctx)
     bus = inner.get("bus")
     if bus is None:
-        return _dump({"success": False, "error": "Bus not initialized in context."})
+        return dump_tool_result({"success": False, "error": "Bus not initialized in context."})
 
     async with bus._lock:
         if agent_id not in bus.statuses:
-            return _dump(
+            return dump_tool_result(
                 {
                     "success": False,
                     "error": f"Unknown agent_id: {agent_id}",
                 }
             )
-        return _dump(
+        return dump_tool_result(
             {
                 "success": True,
                 "agent_id": agent_id,
@@ -173,11 +169,11 @@ async def send_message_to_agent(
     bus = inner.get("bus")
     me = inner.get("agent_id")
     if bus is None or me is None:
-        return _dump({"success": False, "error": "Bus or agent_id missing in context."})
+        return dump_tool_result({"success": False, "error": "Bus or agent_id missing in context."})
 
     async with bus._lock:
         if target_agent_id not in bus.statuses:
-            return _dump(
+            return dump_tool_result(
                 {
                     "success": False,
                     "error": f"Target agent '{target_agent_id}' not found.",
@@ -186,7 +182,7 @@ async def send_message_to_agent(
         target_status = bus.statuses.get(target_agent_id)
 
     if target_status in ("completed", "crashed", "stopped"):
-        return _dump(
+        return dump_tool_result(
             {
                 "success": False,
                 "error": f"Target agent '{target_agent_id}' is {target_status}; message dropped.",
@@ -204,7 +200,7 @@ async def send_message_to_agent(
             "priority": priority,
         },
     )
-    return _dump(
+    return dump_tool_result(
         {
             "success": True,
             "message_id": msg_id,
@@ -255,7 +251,7 @@ async def wait_for_message(
     bus = inner.get("bus")
     me = inner.get("agent_id")
     if bus is None or me is None:
-        return _dump({"success": False, "error": "Bus or agent_id missing in context."})
+        return dump_tool_result({"success": False, "error": "Bus or agent_id missing in context."})
 
     async with bus._lock:
         bus.statuses[me] = "waiting"
@@ -268,7 +264,7 @@ async def wait_for_message(
             if pending > 0:
                 async with bus._lock:
                     bus.statuses[me] = "running"
-                return _dump(
+                return dump_tool_result(
                     {
                         "success": True,
                         "status": "message_arrived",
@@ -284,7 +280,7 @@ async def wait_for_message(
             if bus.statuses.get(me) == "waiting":
                 bus.statuses[me] = "running"
 
-    return _dump(
+    return dump_tool_result(
         {
             "success": True,
             "status": "timeout",
@@ -348,9 +344,9 @@ async def create_agent(
     factory: Callable[..., SDKAgent] | None = inner.get("agent_factory")
 
     if bus is None or parent_id is None:
-        return _dump({"success": False, "error": "Bus or agent_id missing in context."})
+        return dump_tool_result({"success": False, "error": "Bus or agent_id missing in context."})
     if factory is None:
-        return _dump(
+        return dump_tool_result(
             {
                 "success": False,
                 "error": (
@@ -366,7 +362,7 @@ async def create_agent(
         child_agent = factory(name=name, skills=skills or [])
     except Exception as e:
         logger.exception("agent_factory raised while building child '%s'", name)
-        return _dump(
+        return dump_tool_result(
             {
                 "success": False,
                 "error": f"agent_factory failed: {e!s}",
@@ -444,7 +440,7 @@ async def create_agent(
     async with bus._lock:
         bus.tasks[child_id] = task_handle
 
-    return _dump(
+    return dump_tool_result(
         {
             "success": True,
             "agent_id": child_id,
@@ -502,11 +498,11 @@ async def agent_finish(
     bus = inner.get("bus")
     me = inner.get("agent_id")
     if bus is None or me is None:
-        return _dump({"success": False, "error": "Bus or agent_id missing in context."})
+        return dump_tool_result({"success": False, "error": "Bus or agent_id missing in context."})
 
     parent_id = inner.get("parent_id")
     if parent_id is None:
-        return _dump(
+        return dump_tool_result(
             {
                 "success": False,
                 "agent_completed": False,
@@ -547,7 +543,7 @@ async def agent_finish(
         )
         parent_notified = True
 
-    return _dump(
+    return dump_tool_result(
         {
             "success": True,
             "agent_completed": True,

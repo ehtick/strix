@@ -13,17 +13,10 @@ sandbox-only dependency).
 
 from __future__ import annotations
 
-import json
-from typing import Any
-
 from agents import RunContextWrapper
 
-from strix.tools._decorator import strix_tool
+from strix.tools._decorator import dump_tool_result, strix_tool
 from strix.tools._sandbox_dispatch import post_to_sandbox
-
-
-def _dump(result: dict[str, Any]) -> str:
-    return json.dumps(result, ensure_ascii=False, default=str)
 
 
 @strix_tool(timeout=180)
@@ -66,7 +59,7 @@ async def str_replace_editor(
         insert_line: Required for ``insert``; new content goes AFTER
             this line.
     """
-    return _dump(
+    return dump_tool_result(
         await post_to_sandbox(
             ctx,
             "str_replace_editor",
@@ -98,7 +91,7 @@ async def list_files(
         path: Directory path; relative paths anchor at ``/workspace``.
         recursive: When True, walks subdirectories.
     """
-    return _dump(
+    return dump_tool_result(
         await post_to_sandbox(
             ctx,
             "list_files",
@@ -126,7 +119,7 @@ async def search_files(
         file_pattern: Glob filter (e.g. ``"*.py"``, ``"*.{js,ts}"``).
             Defaults to all files.
     """
-    return _dump(
+    return dump_tool_result(
         await post_to_sandbox(
             ctx,
             "search_files",
