@@ -1449,3 +1449,37 @@ def validate_config_file(config_path: str) -> Path:
         sys.exit(1)
 
     return path
+
+
+def format_resume_hint(run_name: str | None) -> Panel | None:
+    """Tell the user how to resume the current run, if it persisted state.
+
+    Returns a Rich :class:`Panel` ready to ``console.print`` when
+    ``strix_runs/<run_name>/bus.json`` exists (i.e. the scan registered
+    at least the root agent and has snapshot state to resume from).
+    Returns ``None`` when there's nothing to resume — e.g. the user hit
+    Ctrl+C before sandbox bring-up, or no run-name was assigned yet.
+
+    Mirrors the auto-resume contract in ``orchestration/scan.py``:
+    re-running with the same ``--run-name`` picks up where this scan
+    left off; deleting ``strix_runs/<run_name>/`` forces a fresh start.
+    """
+    if not run_name:
+        return None
+    run_dir = Path("strix_runs") / run_name
+    if not (run_dir / "bus.json").exists():
+        return None
+
+    text = Text()
+    text.append("Run paused. Resume any time with:\n\n", style="white")
+    text.append(f"  strix --run-name {run_name}\n", style="bold #60a5fa")
+    text.append("\nOr delete ", style="dim")
+    text.append(f"strix_runs/{run_name}/", style="bold dim")
+    text.append(" to start fresh.", style="dim")
+    return Panel(
+        text,
+        title="[bold white]STRIX",
+        title_align="left",
+        border_style="#60a5fa",
+        padding=(1, 2),
+    )

@@ -35,7 +35,7 @@ from strix.config import load_settings
 from strix.interface.tool_components.agent_message_renderer import AgentMessageRenderer
 from strix.interface.tool_components.registry import get_tool_renderer
 from strix.interface.tool_components.user_message_renderer import UserMessageRenderer
-from strix.interface.utils import build_tui_stats_text
+from strix.interface.utils import build_tui_stats_text, format_resume_hint
 from strix.orchestration.scan import run_strix_scan
 from strix.runtime import session_manager
 from strix.telemetry.tracer import Tracer, set_global_tracer
@@ -1991,4 +1991,16 @@ class StrixTUIApp(App):  # type: ignore[misc]
 async def run_tui(args: argparse.Namespace) -> None:
     """Run strix in interactive TUI mode with textual."""
     app = StrixTUIApp(args)
-    await app.run_async()
+    try:
+        await app.run_async()
+    finally:
+        # After Textual restores the real terminal, print the resume
+        # hint so the user knows the exact ``strix --run-name X``
+        # invocation that picks up where they left off.
+        from rich.console import Console
+
+        hint = format_resume_hint(getattr(args, "run_name", None))
+        if hint is not None:
+            console = Console()
+            console.print()
+            console.print(hint)
