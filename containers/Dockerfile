@@ -77,6 +77,13 @@ RUN pipx install arjun && \
     pipx inject dirsearch setuptools && \
     pipx install wafw00f
 
+# ``python_action`` ships a fresh ``caido-sdk-client`` per call into /tmp.
+# Install it system-wide so the driver's ``import caido_sdk_client`` resolves
+# without venv activation. The helper *logic* lives host-side in
+# ``strix/tools/proxy/_calls.py`` (shipped at runtime) — only the SDK dep
+# is image-baked.
+RUN pip install --break-system-packages --no-cache-dir caido-sdk-client
+
 ENV NPM_CONFIG_PREFIX=/home/pentester/.npm-global
 RUN mkdir -p /home/pentester/.npm-global
 

@@ -37,13 +37,16 @@ def _resolve_skills(
     2. ``scan_modes/<mode>`` (always).
     3. ``tooling/agent_browser`` (always — every agent has shell + the
        agent-browser CLI).
-    4. ``coordination/root_agent`` for the root agent only — orchestration
+    4. ``tooling/python`` (always — every agent has the ``python_action``
+       tool with proxy helpers pre-bound).
+    5. ``coordination/root_agent`` for the root agent only — orchestration
        guidance for delegating to specialist subagents.
-    5. Whitebox-specific skills if applicable.
+    6. Whitebox-specific skills if applicable.
     """
     ordered: list[str] = list(requested or [])
     ordered.append(f"scan_modes/{scan_mode}")
     ordered.append("tooling/agent_browser")
+    ordered.append("tooling/python")
     if is_root:
         ordered.append("coordination/root_agent")
     if is_whitebox:

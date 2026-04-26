@@ -51,6 +51,7 @@ from strix.tools.proxy.tools import (
     send_request,
     view_request,
 )
+from strix.tools.python.tool import python_action
 from strix.tools.reporting.tool import create_vulnerability_report
 from strix.tools.thinking.tool import think
 from strix.tools.todo.tools import (
@@ -99,6 +100,8 @@ _BASE_TOOLS: tuple[Tool, ...] = (
     send_request,
     repeat_request,
     scope_rules,
+    # Stateless Python execution with proxy helpers pre-bound
+    python_action,
     # Multi-agent graph tools (the bus is in ctx.context)
     view_agent_graph,
     agent_status,

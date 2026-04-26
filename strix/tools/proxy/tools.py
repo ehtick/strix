@@ -1,9 +1,10 @@
-"""Caido proxy tools — host-side via ``caido-sdk-client``.
+"""Caido proxy tools — host-side ``@function_tool`` wrappers around ``_calls``.
 
-The five tools delegate directly to ``caido_sdk_client.Client`` instances
-held in the per-scan agent context. No sandbox round-trip; the SDK
-talks GraphQL to the in-container Caido sidecar via the host-mapped
-port resolved at session create time.
+The five tools delegate to :mod:`strix.tools.proxy._calls` for the actual
+caido-sdk-client work and add LLM-friendly JSON serialization + error
+wrapping on top. The shared call layer is also reused by the
+``python_action`` tool to expose the same proxy surface inside the
+sandbox's Python kernel — single source of truth for the SDK shapes.
 
 Tools: ``list_requests``, ``view_request``, ``send_request``,
 ``repeat_request``, ``scope_rules``.
@@ -14,53 +15,32 @@ from __future__ import annotations
 import dataclasses
 import json
 import re
-import time
 from dataclasses import is_dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from agents import RunContextWrapper, function_tool
-from caido_sdk_client.types import (
-    ConnectionInfoInput,
-    CreateReplaySessionFromRaw,
-    CreateReplaySessionOptions,
-    CreateScopeOptions,
-    ReplaySendOptions,
-    RequestGetOptions,
-    UpdateScopeOptions,
-)
+
+from strix.tools.proxy import _calls
 
 
 if TYPE_CHECKING:
     from caido_sdk_client import Client
 
+    from strix.tools.proxy._calls import RequestPart, SortBy, SortOrder
+else:
+    # Runtime import: ``function_tool`` resolves the annotations via
+    # ``typing.get_type_hints`` so the Literal aliases must be reachable
+    # in module globals at decoration time even though they're "only"
+    # used in annotations.
+    from strix.tools.proxy._calls import (  # noqa: TC001
+        RequestPart,
+        SortBy,
+        SortOrder,
+    )
 
-RequestPart = Literal["request", "response"]
-SortBy = Literal[
-    "timestamp",
-    "host",
-    "method",
-    "path",
-    "status_code",
-    "response_time",
-    "response_size",
-    "source",
-]
-SortOrder = Literal["asc", "desc"]
+
 ScopeAction = Literal["get", "list", "create", "update", "delete"]
-
-
-_REQ_FIELD_MAP: dict[SortBy, tuple[str, str]] = {
-    "timestamp": ("req", "created_at"),
-    "host": ("req", "host"),
-    "method": ("req", "method"),
-    "path": ("req", "path"),
-    "source": ("req", "source"),
-    "status_code": ("resp", "code"),
-    "response_time": ("resp", "roundtrip"),
-    "response_size": ("resp", "length"),
-}
 
 
 def _ctx_client(ctx: RunContextWrapper) -> Client | None:
@@ -92,10 +72,15 @@ def _serialize(value: Any) -> Any:
 
 def _no_client() -> str:
     return json.dumps(
-        {
-            "success": False,
-            "error": "Caido client not initialized in context.",
-        },
+        {"success": False, "error": "Caido client not available in run context"},
+        ensure_ascii=False,
+        default=str,
+    )
+
+
+def _err(name: str, exc: Exception) -> str:
+    return json.dumps(
+        {"success": False, "error": f"{name} failed: {exc}"},
         ensure_ascii=False,
         default=str,
     )
@@ -155,21 +140,15 @@ async def list_requests(
         return _no_client()
 
     try:
-        builder = client.request.list().first(first)
-        if httpql_filter:
-            builder = builder.filter(httpql_filter)
-        if after:
-            builder = builder.after(after)
-        if scope_id:
-            builder = builder.scope(scope_id)
-
-        target, field = _REQ_FIELD_MAP[sort_by]
-        if sort_order == "asc":
-            builder = builder.ascending(target, field)
-        else:
-            builder = builder.descending(target, field)
-
-        connection = await builder.execute()
+        connection = await _calls.list_requests(
+            client,
+            httpql_filter=httpql_filter,
+            first=first,
+            after=after,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            scope_id=scope_id,
+        )
 
         entries = []
         for edge in connection.edges:
@@ -217,11 +196,7 @@ async def list_requests(
             default=str,
         )
     except Exception as exc:  # noqa: BLE001
-        return json.dumps(
-            {"success": False, "error": f"list_requests failed: {exc}"},
-            ensure_ascii=False,
-            default=str,
-        )
+        return _err("list_requests", exc)
 
 
 # ----------------------------------------------------------------------
@@ -266,11 +241,7 @@ async def view_request(
         return _no_client()
 
     try:
-        opts = RequestGetOptions(
-            request_raw=(part == "request"),
-            response_raw=(part == "response"),
-        )
-        result = await client.request.get(request_id, opts)
+        result = await _calls.get_request(client, request_id, part=part)
         if result is None:
             return json.dumps(
                 {"success": False, "error": f"Request {request_id} not found"},
@@ -303,11 +274,7 @@ async def view_request(
             default=str,
         )
     except Exception as exc:  # noqa: BLE001
-        return json.dumps(
-            {"success": False, "error": f"view_request failed: {exc}"},
-            ensure_ascii=False,
-            default=str,
-        )
+        return _err("view_request", exc)
 
 
 def _regex_hits(content: str, pattern: str) -> dict[str, Any]:
@@ -381,16 +348,13 @@ async def send_request(
         return _no_client()
 
     try:
-        connection, raw = _build_raw_request(
+        connection, raw = _calls.build_raw_request(
             method=method, url=url, headers=headers or {}, body=body
         )
-        return await _replay_send(client, raw=raw, connection=connection)
+        result = await _calls.replay_send_raw(client, raw=raw, connection=connection)
+        return _format_replay_result(result)
     except Exception as exc:  # noqa: BLE001
-        return json.dumps(
-            {"success": False, "error": f"send_request failed: {exc}"},
-            ensure_ascii=False,
-            default=str,
-        )
+        return _err("send_request", exc)
 
 
 # ----------------------------------------------------------------------
@@ -433,7 +397,7 @@ async def repeat_request(
     mods = modifications or {}
 
     try:
-        result = await client.request.get(request_id, RequestGetOptions(request_raw=True))
+        result = await _calls.get_request(client, request_id, part="request")
         if result is None or result.request.raw is None:
             return json.dumps(
                 {"success": False, "error": f"Request {request_id} not found"},
@@ -443,22 +407,38 @@ async def repeat_request(
 
         original = result.request
         raw_str = result.request.raw.decode("utf-8", errors="replace")
-        components = _parse_raw_request(raw_str)
-        full_url = _full_url_from_components(original, components, mods)
-        modified = _apply_modifications(components, mods, full_url)
-        connection, raw = _build_raw_request(
+        components = _calls.parse_raw_request(raw_str)
+        full_url = _calls.full_url_from_components(original, components, mods)
+        modified = _calls.apply_modifications(components, mods, full_url)
+        connection, raw = _calls.build_raw_request(
             method=modified["method"],
             url=modified["url"],
             headers=modified["headers"],
             body=modified["body"],
         )
-        return await _replay_send(client, raw=raw, connection=connection)
+        replay = await _calls.replay_send_raw(client, raw=raw, connection=connection)
+        return _format_replay_result(replay)
     except Exception as exc:  # noqa: BLE001
-        return json.dumps(
-            {"success": False, "error": f"repeat_request failed: {exc}"},
-            ensure_ascii=False,
-            default=str,
-        )
+        return _err("repeat_request", exc)
+
+
+def _format_replay_result(replay: dict[str, Any]) -> str:
+    response_raw = replay.get("response_raw")
+    response: dict[str, Any] | None = None
+    if response_raw is not None:
+        response = {"raw": response_raw.decode("utf-8", errors="replace")}
+    return json.dumps(
+        {
+            "success": replay["status"] == "DONE",
+            "status": replay["status"],
+            "error": replay["error"],
+            "session_id": replay["session_id"],
+            "elapsed_ms": replay["elapsed_ms"],
+            "response": response,
+        },
+        ensure_ascii=False,
+        default=str,
+    )
 
 
 # ----------------------------------------------------------------------
@@ -516,7 +496,7 @@ async def scope_rules(
 
     try:
         if action == "list":
-            scopes = await client.scope.list()
+            scopes = await _calls.scope_list(client)
             return json.dumps(
                 {"success": True, "scopes": [_serialize(s) for s in scopes]},
                 ensure_ascii=False,
@@ -529,7 +509,7 @@ async def scope_rules(
                     ensure_ascii=False,
                     default=str,
                 )
-            scope = await client.scope.get(scope_id)
+            scope = await _calls.scope_get(client, scope_id)
             return json.dumps(
                 {"success": True, "scope": _serialize(scope)}, ensure_ascii=False, default=str
             )
@@ -540,12 +520,8 @@ async def scope_rules(
                     ensure_ascii=False,
                     default=str,
                 )
-            scope = await client.scope.create(
-                CreateScopeOptions(
-                    name=scope_name,
-                    allowlist=list(allowlist or []),
-                    denylist=list(denylist or []),
-                ),
+            scope = await _calls.scope_create(
+                client, name=scope_name, allowlist=allowlist, denylist=denylist
             )
             return json.dumps(
                 {"success": True, "scope": _serialize(scope)}, ensure_ascii=False, default=str
@@ -560,13 +536,8 @@ async def scope_rules(
                     ensure_ascii=False,
                     default=str,
                 )
-            scope = await client.scope.update(
-                scope_id,
-                UpdateScopeOptions(
-                    name=scope_name,
-                    allowlist=list(allowlist or []),
-                    denylist=list(denylist or []),
-                ),
+            scope = await _calls.scope_update(
+                client, scope_id, name=scope_name, allowlist=allowlist, denylist=denylist
             )
             return json.dumps(
                 {"success": True, "scope": _serialize(scope)}, ensure_ascii=False, default=str
@@ -578,156 +549,7 @@ async def scope_rules(
                 ensure_ascii=False,
                 default=str,
             )
-        await client.scope.delete(scope_id)
+        await _calls.scope_delete(client, scope_id)
         return json.dumps({"success": True, "deleted": scope_id}, ensure_ascii=False, default=str)
     except Exception as exc:  # noqa: BLE001
-        return json.dumps(
-            {"success": False, "error": f"scope_rules failed: {exc}"},
-            ensure_ascii=False,
-            default=str,
-        )
-
-
-# ----------------------------------------------------------------------
-# Helpers — request build / parse / modify
-# ----------------------------------------------------------------------
-def _build_raw_request(
-    *,
-    method: str,
-    url: str,
-    headers: dict[str, str],
-    body: str,
-) -> tuple[ConnectionInfoInput, bytes]:
-    parsed = urlparse(url)
-    if not parsed.scheme or not parsed.netloc:
-        raise ValueError(f"Invalid URL: {url}")
-    is_tls = parsed.scheme.lower() == "https"
-    host = parsed.hostname or ""
-    port = parsed.port or (443 if is_tls else 80)
-    path = parsed.path or "/"
-    if parsed.query:
-        path = f"{path}?{parsed.query}"
-
-    final_headers = {**headers}
-    final_headers.setdefault("Host", parsed.netloc)
-    final_headers.setdefault("User-Agent", "strix")
-    if body and "Content-Length" not in {k.title() for k in final_headers}:
-        final_headers["Content-Length"] = str(len(body.encode("utf-8")))
-
-    lines = [f"{method.upper()} {path} HTTP/1.1"]
-    lines.extend(f"{k}: {v}" for k, v in final_headers.items())
-    raw = ("\r\n".join(lines) + "\r\n\r\n" + body).encode("utf-8")
-
-    return ConnectionInfoInput(host=host, port=port, is_tls=is_tls), raw
-
-
-def _parse_raw_request(raw_content: str) -> dict[str, Any]:
-    lines = raw_content.split("\n")
-    request_line = lines[0].strip().split(" ")
-    if len(request_line) < 2:
-        raise ValueError("Invalid request line format")
-    method, url_path = request_line[0], request_line[1]
-
-    parsed_headers: dict[str, str] = {}
-    body_start = 0
-    for i, line in enumerate(lines[1:], 1):
-        if line.strip() == "":
-            body_start = i + 1
-            break
-        if ":" in line:
-            key, value = line.split(":", 1)
-            parsed_headers[key.strip()] = value.strip()
-
-    body = "\n".join(lines[body_start:]).strip() if body_start < len(lines) else ""
-    return {"method": method, "url_path": url_path, "headers": parsed_headers, "body": body}
-
-
-def _full_url_from_components(
-    original: Any,
-    components: dict[str, Any],
-    modifications: dict[str, Any],
-) -> str:
-    if "url" in modifications:
-        return str(modifications["url"])
-    headers = components["headers"]
-    host_header = headers.get("Host") or original.host
-    scheme = "https" if original.is_tls else "http"
-    return f"{scheme}://{host_header}{components['url_path']}"
-
-
-def _apply_modifications(
-    components: dict[str, Any],
-    modifications: dict[str, Any],
-    full_url: str,
-) -> dict[str, Any]:
-    headers = dict(components["headers"])
-    body = components["body"]
-    final_url = full_url
-
-    if "params" in modifications:
-        parsed = urlparse(final_url)
-        existing = {k: v[0] if v else "" for k, v in parse_qs(parsed.query).items()}
-        existing.update(modifications["params"])
-        final_url = urlunparse(parsed._replace(query=urlencode(existing)))
-
-    if "headers" in modifications:
-        headers.update(modifications["headers"])
-
-    if "body" in modifications:
-        body = modifications["body"]
-
-    if "cookies" in modifications:
-        cookies: dict[str, str] = {}
-        if headers.get("Cookie"):
-            for cookie in headers["Cookie"].split(";"):
-                if "=" in cookie:
-                    k, v = cookie.split("=", 1)
-                    cookies[k.strip()] = v.strip()
-        cookies.update(modifications["cookies"])
-        headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
-
-    return {
-        "method": components["method"],
-        "url": final_url,
-        "headers": headers,
-        "body": body,
-    }
-
-
-async def _replay_send(
-    client: Client,
-    *,
-    raw: bytes,
-    connection: ConnectionInfoInput,
-) -> str:
-    started = time.time()
-    session = await client.replay.sessions.create(
-        CreateReplaySessionOptions(
-            request_source=CreateReplaySessionFromRaw(raw=raw, connection=connection),
-        ),
-    )
-    result = await client.replay.send(
-        session.id,
-        ReplaySendOptions(raw=raw, connection=connection),
-    )
-    elapsed_ms = int((time.time() - started) * 1000)
-
-    response: dict[str, Any] | None = None
-    response_raw = result.entry.response_raw if hasattr(result.entry, "response_raw") else None
-    if response_raw is not None:
-        response = {
-            "raw": response_raw.decode("utf-8", errors="replace"),
-        }
-
-    return json.dumps(
-        {
-            "success": result.status == "DONE",
-            "status": result.status,
-            "error": result.error,
-            "session_id": str(session.id),
-            "elapsed_ms": elapsed_ms,
-            "response": response,
-        },
-        ensure_ascii=False,
-        default=str,
-    )
+        return _err("scope_rules", exc)
