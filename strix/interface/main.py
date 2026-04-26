@@ -464,6 +464,14 @@ def display_completion_message(args: argparse.Namespace, results_path: Path) -> 
     results_text.append(str(results_path), style="#60a5fa")
     panel_parts.extend(["\n", results_text])
 
+    if not scan_completed:
+        resume_text = Text()
+        resume_text.append("\n")
+        resume_text.append("Resume", style="dim")
+        resume_text.append("  ")
+        resume_text.append(f"strix --run-name {args.run_name}", style="#22c55e")
+        panel_parts.extend(["\n", resume_text])
+
     panel_content = Text.assemble(*panel_parts)
 
     border_style = "#22c55e" if scan_completed else "#eab308"

@@ -21,7 +21,6 @@ from strix.telemetry.tracer import Tracer, set_global_tracer
 
 from .utils import (
     build_live_stats_text,
-    format_resume_hint,
     format_vulnerability_report,
 )
 
@@ -140,10 +139,6 @@ async def run_cli(args: Any) -> None:  # noqa: PLR0915
 
     def signal_handler(_signum: int, _frame: Any) -> None:
         tracer.cleanup()
-        hint = format_resume_hint(args.run_name)
-        if hint is not None:
-            console.print()
-            console.print(hint)
         sys.exit(1)
 
     atexit.register(cleanup_on_exit)
@@ -217,10 +212,6 @@ async def run_cli(args: Any) -> None:  # noqa: PLR0915
 
     except Exception as e:
         console.print(f"[bold red]Error during penetration test:[/] {e}")
-        hint = format_resume_hint(args.run_name)
-        if hint is not None:
-            console.print()
-            console.print(hint)
         raise
 
     if tracer.final_scan_result:
