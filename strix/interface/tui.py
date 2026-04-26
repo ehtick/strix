@@ -32,11 +32,11 @@ from textual.widgets import Button, Label, Static, TextArea, Tree
 from textual.widgets.tree import TreeNode
 
 from strix.config import load_settings
-from strix.entry import run_strix_scan
 from strix.interface.tool_components.agent_message_renderer import AgentMessageRenderer
 from strix.interface.tool_components.registry import get_tool_renderer
 from strix.interface.tool_components.user_message_renderer import UserMessageRenderer
 from strix.interface.utils import build_tui_stats_text
+from strix.orchestration.scan import run_strix_scan
 from strix.runtime import session_manager
 from strix.telemetry.tracer import Tracer, set_global_tracer
 

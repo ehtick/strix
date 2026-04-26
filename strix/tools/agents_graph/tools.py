@@ -22,12 +22,16 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
-from agents import RunContextWrapper, function_tool
+from agents import RunConfig, RunContextWrapper, function_tool
 from agents.items import TResponseInputItem
+from agents.model_settings import ModelSettings
+from agents.sandbox import SandboxRunConfig
 
+from strix.llm.multi_provider_setup import build_multi_provider
+from strix.llm.retry import DEFAULT_RETRY
+from strix.orchestration.filter import inject_messages_filter
 from strix.orchestration.hooks import StrixOrchestrationHooks
 from strix.orchestration.run_loop import run_with_continuation
-from strix.run_config_factory import make_agent_context, make_run_config
 
 
 if TYPE_CHECKING:
@@ -428,7 +432,7 @@ async def create_agent(
                 "success": False,
                 "error": (
                     "No agent_factory in context. "
-                    "The root assembly must inject one via make_agent_context."
+                    "The root assembly must inject one when building the run context."
                 ),
             },
             ensure_ascii=False,
@@ -485,32 +489,48 @@ async def create_agent(
     )
     initial_input.append({"role": "user", "content": task})
 
-    child_ctx = make_agent_context(
-        bus=bus,
-        sandbox_session=inner.get("sandbox_session"),
-        sandbox_client=inner.get("sandbox_client"),
-        caido_client=inner.get("caido_client"),
-        agent_id=child_id,
-        parent_id=parent_id,
-        tracer=inner.get("tracer"),
-        model=inner["model"],
-        model_settings=inner.get("model_settings"),
-        max_turns=int(inner.get("max_turns", 300)),
-        is_whitebox=bool(inner.get("is_whitebox", False)),
-        interactive=bool(inner.get("interactive", False)),
-        diff_scope=inner.get("diff_scope"),
-        run_id=inner.get("run_id"),
-        agent_factory=factory,
-    )
-    # Stash the task string for ``agent_finish`` to echo back in its
-    # XML completion report.
-    child_ctx["task"] = task
+    child_ctx: dict[str, Any] = {
+        "bus": bus,
+        "sandbox_session": inner.get("sandbox_session"),
+        "sandbox_client": inner.get("sandbox_client"),
+        "caido_client": inner.get("caido_client"),
+        "agent_id": child_id,
+        "parent_id": parent_id,
+        "tracer": inner.get("tracer"),
+        "model": inner["model"],
+        "model_settings": inner.get("model_settings"),
+        "max_turns": int(inner.get("max_turns", 300)),
+        "agent_finish_called": False,
+        "is_whitebox": bool(inner.get("is_whitebox", False)),
+        "interactive": bool(inner.get("interactive", False)),
+        "diff_scope": inner.get("diff_scope"),
+        "run_id": inner.get("run_id"),
+        "agent_factory": factory,
+        # Stashed for ``agent_finish`` to echo back in its completion report.
+        "task": task,
+    }
 
-    child_run_config = make_run_config(
-        sandbox_session=inner.get("sandbox_session"),
-        sandbox_client=inner.get("sandbox_client"),
+    child_model_settings = ModelSettings(
+        parallel_tool_calls=False,
+        tool_choice="required",
+        retry=DEFAULT_RETRY,
+    )
+    override = inner.get("model_settings")
+    if override is not None:
+        child_model_settings = child_model_settings.resolve(override)
+    sandbox_session = inner.get("sandbox_session")
+    child_run_config = RunConfig(
         model=inner["model"],
-        model_settings_override=inner.get("model_settings"),
+        model_provider=build_multi_provider(),
+        model_settings=child_model_settings,
+        sandbox=(
+            SandboxRunConfig(client=inner.get("sandbox_client"), session=sandbox_session)
+            if sandbox_session is not None
+            else None
+        ),
+        call_model_input_filter=inject_messages_filter,
+        tracing_disabled=False,
+        trace_include_sensitive_data=False,
     )
 
     task_handle = asyncio.create_task(

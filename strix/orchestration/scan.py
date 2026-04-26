@@ -20,19 +20,25 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+from agents import RunConfig
 from agents.memory import SQLiteSession
+from agents.model_settings import ModelSettings
+from agents.sandbox import SandboxRunConfig
+from openai.types.shared import Reasoning
 
 from strix.agents.factory import build_strix_agent, make_child_factory
 from strix.config import load_settings
+from strix.llm.multi_provider_setup import build_multi_provider
+from strix.llm.retry import DEFAULT_RETRY
 from strix.orchestration.bus import AgentMessageBus
+from strix.orchestration.filter import inject_messages_filter
 from strix.orchestration.hooks import StrixOrchestrationHooks
 from strix.orchestration.run_loop import run_with_continuation
-from strix.run_config_factory import (
-    STRIX_DEFAULT_MAX_TURNS,
-    make_agent_context,
-    make_run_config,
-)
 from strix.runtime import session_manager
+
+
+#: Default ``max_turns`` budget passed to ``Runner.run``.
+_MAX_TURNS = 300
 
 
 if TYPE_CHECKING:
@@ -160,7 +166,7 @@ async def run_strix_scan(
     tracer: Any | None = None,
     bus: AgentMessageBus | None = None,
     interactive: bool = False,
-    max_turns: int = STRIX_DEFAULT_MAX_TURNS,
+    max_turns: int = _MAX_TURNS,
     model: str | None = None,
     cleanup_on_exit: bool = True,
 ) -> RunResultBase:
@@ -215,7 +221,7 @@ async def run_strix_scan(
     )
 
     try:
-        # Lazy: ``strix.interface`` pulls cli→tui→entry which would cycle.
+        # Lazy: ``strix.interface`` pulls cli→tui→scan which would cycle.
         from strix.interface.utils import is_whitebox_scan
 
         scan_mode = str(scan_config.get("scan_mode") or "deep")
@@ -245,31 +251,45 @@ async def run_strix_scan(
             system_prompt_context=scope_context,
         )
 
-        context = make_agent_context(
-            bus=bus,
-            sandbox_session=bundle["session"],
-            sandbox_client=bundle["client"],
-            caido_client=bundle["caido_client"],
-            agent_id=root_id,
-            parent_id=None,
-            tracer=tracer,
-            model=resolved_model,
-            max_turns=max_turns,
-            is_whitebox=is_whitebox,
-            interactive=interactive,
-            diff_scope=diff_scope,
-            run_id=run_id,
-            agent_factory=agent_factory,
-        )
+        context: dict[str, Any] = {
+            "bus": bus,
+            "sandbox_session": bundle["session"],
+            "sandbox_client": bundle["client"],
+            "caido_client": bundle["caido_client"],
+            "agent_id": root_id,
+            "parent_id": None,
+            "tracer": tracer,
+            "model": resolved_model,
+            "model_settings": None,
+            "max_turns": max_turns,
+            "agent_finish_called": False,
+            "is_whitebox": is_whitebox,
+            "interactive": interactive,
+            "diff_scope": diff_scope,
+            "run_id": run_id,
+            "agent_factory": agent_factory,
+        }
 
         reasoning_effort: Literal["low", "medium", "high"] | None = (
             load_settings().llm.reasoning_effort
         )
-        run_config = make_run_config(
-            sandbox_session=bundle["session"],
-            sandbox_client=bundle["client"],
+        model_settings = ModelSettings(
+            parallel_tool_calls=False,
+            tool_choice="required",
+            retry=DEFAULT_RETRY,
+        )
+        if reasoning_effort is not None:
+            model_settings = model_settings.resolve(
+                ModelSettings(reasoning=Reasoning(effort=reasoning_effort)),
+            )
+        run_config = RunConfig(
             model=resolved_model,
-            reasoning_effort=reasoning_effort,
+            model_provider=build_multi_provider(),
+            model_settings=model_settings,
+            sandbox=SandboxRunConfig(client=bundle["client"], session=bundle["session"]),
+            call_model_input_filter=inject_messages_filter,
+            tracing_disabled=False,
+            trace_include_sensitive_data=False,
         )
 
         # Native SDK session: persists conversation history to

@@ -18,7 +18,7 @@ from openai.types.responses import ResponseOutputMessage
 
 from strix.config import load_settings
 from strix.llm.multi_provider_setup import build_multi_provider
-from strix.run_config_factory import DEFAULT_RETRY
+from strix.llm.retry import DEFAULT_RETRY
 
 
 if TYPE_CHECKING:

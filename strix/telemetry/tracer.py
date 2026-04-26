@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
 
-from strix.io.scan_artifacts import ScanArtifactWriter
 from strix.telemetry import posthog
+from strix.telemetry.scan_artifacts import ScanArtifactWriter
 
 
 logger = logging.getLogger(__name__)
