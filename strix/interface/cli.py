@@ -1,12 +1,10 @@
 import atexit
 import contextlib
 import logging
-import os
 import signal
 import sys
 import threading
 import time
-from pathlib import Path
 from typing import Any
 
 from rich.console import Console
@@ -35,26 +33,6 @@ def _resolve_sandbox_image() -> str:
             "strix_image is not configured. Set it in ~/.strix/cli-config.json.",
         )
     return image
-
-
-def _resolve_sources_path(args: Any) -> Path:
-    """Pick the host directory to mount into ``/workspace/sources``.
-
-    - With ``--local-sources``, mount the parent of the first source so
-      the agent can walk down into the actual tree.
-    - Otherwise, a per-run scratch dir under ``$XDG_CACHE_HOME/strix``.
-    """
-    local_sources: list[dict[str, str]] | None = getattr(args, "local_sources", None)
-    if local_sources:
-        first = local_sources[0]
-        host_path = first.get("host_path") or first.get("source_path") or first.get("path")
-        if host_path:
-            return Path(host_path).expanduser().resolve().parent
-
-    cache_root = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
-    sources = Path(cache_root) / "strix" / "sources" / str(args.run_name)
-    sources.mkdir(parents=True, exist_ok=True)
-    return sources
 
 
 async def run_cli(args: Any) -> None:  # noqa: PLR0915
@@ -200,7 +178,7 @@ async def run_cli(args: Any) -> None:  # noqa: PLR0915
                     scan_config=scan_config,
                     scan_id=args.run_name,
                     image=_resolve_sandbox_image(),
-                    sources_path=_resolve_sources_path(args),
+                    local_sources=getattr(args, "local_sources", None) or [],
                     tracer=tracer,
                     interactive=bool(getattr(args, "interactive", False)),
                 )

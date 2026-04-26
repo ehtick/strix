@@ -27,6 +27,7 @@ import contextlib
 import json
 import logging
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -45,7 +46,7 @@ from strix.orchestration.filter import inject_messages_filter
 from strix.orchestration.hooks import StrixOrchestrationHooks
 from strix.orchestration.run_loop import run_with_continuation
 from strix.runtime import session_manager
-from strix.telemetry.logging import set_scan_id, setup_scan_logging
+from strix.telemetry.logging import set_agent_id, set_scan_id, setup_scan_logging
 
 
 #: Default ``max_turns`` budget passed to ``Runner.run``.
@@ -173,7 +174,7 @@ async def run_strix_scan(
     scan_config: dict[str, Any],
     scan_id: str | None = None,
     image: str,
-    sources_path: Path,
+    local_sources: list[dict[str, str]] | None = None,
     tracer: Any | None = None,
     bus: AgentMessageBus | None = None,
     interactive: bool = False,
@@ -192,7 +193,11 @@ async def run_strix_scan(
             should pass a stable id.
         image: Docker image tag for the sandbox (e.g.
             ``"strix-sandbox:0.2.0"``).
-        sources_path: Host directory mounted into ``/workspace/sources``.
+        local_sources: Per-source mount specs from
+            :func:`strix.interface.utils.collect_local_sources` —
+            each entry's ``source_path`` (host) is bind-mounted at
+            ``/workspace/<workspace_subdir>``. Pass ``None`` (or ``[]``)
+            for non-whitebox runs.
         tracer: Optional Strix tracer. Stored in context for the
             telemetry hook chain. Pass ``None`` for unit tests.
         interactive: Renders the interactive-mode prompt block on the
@@ -300,7 +305,7 @@ async def run_strix_scan(
     bundle = await session_manager.create_or_reuse(
         scan_id,
         image=image,
-        sources_path=sources_path,
+        local_sources=local_sources or [],
     )
     logger.info("Sandbox ready for scan %s", scan_id)
 
@@ -450,12 +455,27 @@ async def run_strix_scan(
             interactive=interactive,
             session=root_session,
         )
-    except BaseException:
+    except BaseException as exc:
         logger.exception("Strix scan %s failed", scan_id)
         # Cancel any descendant tasks the root spawned before unwinding.
         # cancel_descendants is idempotent and handles the empty-tree case.
         if root_id is not None:
             await bus.cancel_descendants(root_id)
+            # The SDK's on_agent_end hook only fires after a successful
+            # ``Runner.run_streamed`` reaches the agent's first turn. A
+            # failure earlier (e.g., model-provider routing, sandbox
+            # bring-up) leaves the root stuck at status="running" — the
+            # TUI keeps animating "Initializing" forever. Finalize it
+            # here so the bus + tracer reflect reality, and stash the
+            # error message for the status-line display.
+            error_message = f"{type(exc).__name__}: {exc}"
+            if tracer is not None and root_id in getattr(tracer, "agents", {}):
+                tracer.agents[root_id]["status"] = "failed"
+                tracer.agents[root_id]["error_message"] = error_message
+                tracer.agents[root_id]["updated_at"] = datetime.now(UTC).isoformat()
+            with contextlib.suppress(Exception):
+                await bus.finalize(root_id, "failed")
+            set_agent_id(None)
         raise
     finally:
         for s in sessions_to_close:

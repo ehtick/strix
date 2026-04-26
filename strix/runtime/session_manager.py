@@ -16,18 +16,15 @@ next scan from starting.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import Any
 
-from agents.sandbox.entries import LocalDir
+from agents.sandbox.entries import BaseEntry, LocalDir
 from agents.sandbox.manifest import Environment, Manifest
 
 from strix.config import load_settings
 from strix.runtime.backends import get_backend
 from strix.runtime.caido_bootstrap import bootstrap_caido
-
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 logger = logging.getLogger(__name__)
@@ -48,15 +45,17 @@ async def create_or_reuse(
     scan_id: str,
     *,
     image: str,
-    sources_path: Path,
+    local_sources: list[dict[str, str]],
 ) -> dict[str, Any]:
     """Return the existing bundle for ``scan_id`` or create a new one.
 
     Args:
         scan_id: Caller-provided scan identifier (used as cache key).
         image: Docker image tag (e.g. ``"strix-sandbox:0.2.0"``).
-        sources_path: Host directory mounted into the container's
-            ``/workspace/sources`` so the agent can read user code.
+        local_sources: Each entry's ``source_path`` (host) is mounted at
+            ``/workspace/<workspace_subdir>`` inside the container — the
+            same path the root-task prompt advertises. Empty list means
+            no host code is mounted (web/IP-only scans).
 
     Returns the bundle dict containing ``client``, ``session``, and
     ``caido_client``.
@@ -66,6 +65,19 @@ async def create_or_reuse(
         logger.info("Reusing existing sandbox session for scan %s", scan_id)
         return cached
 
+    # Build Manifest entries keyed by ``workspace_subdir`` — the SDK
+    # mounts each at ``/workspace/<key>``, which is exactly the path
+    # ``_build_root_task`` puts in the agent's task prompt. Mounting
+    # only the listed source dirs (not their parent) avoids leaking
+    # unrelated host content into the sandbox.
+    entries: dict[str | Path, BaseEntry] = {}
+    for src in local_sources:
+        ws_subdir = src.get("workspace_subdir") or ""
+        host_path = src.get("source_path") or ""
+        if not ws_subdir or not host_path:
+            continue
+        entries[ws_subdir] = LocalDir(src=Path(host_path).expanduser().resolve())
+
     # Caido runs as an in-container sidecar; HTTP(S) traffic from any
     # process started via ``session.exec`` (the SDK's Shell tool, etc.)
     # picks up these env vars automatically. ``NO_PROXY`` keeps the
@@ -73,7 +85,7 @@ async def create_or_reuse(
     # through Caido.
     container_caido_url = f"http://127.0.0.1:{_CONTAINER_CAIDO_PORT}"
     manifest = Manifest(
-        entries={"sources": LocalDir(src=sources_path)},
+        entries=entries,
         environment=Environment(
             value={
                 "PYTHONUNBUFFERED": "1",

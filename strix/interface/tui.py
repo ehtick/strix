@@ -3,14 +3,12 @@ import asyncio
 import atexit
 import contextlib
 import logging
-import os
 import signal
 import sys
 import threading
 from collections.abc import Callable
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
 
@@ -726,6 +724,10 @@ class StrixTUIApp(App):  # type: ignore[misc]
         self._scan_loop: asyncio.AbstractEventLoop | None = None
         self._scan_stop_event = threading.Event()
         self._scan_completed = threading.Event()
+        # Captured by ``scan_target`` when the scan thread crashes; read
+        # by ``run_tui`` after ``run_async()`` returns so the user sees
+        # the traceback on stderr instead of just a silent UI hang.
+        self._scan_error: BaseException | None = None
 
         self._spinner_frame_index: int = 0  # Current animation frame index
         self._sweep_num_squares: int = 6  # Number of squares in sweep animation
@@ -742,18 +744,6 @@ class StrixTUIApp(App):  # type: ignore[misc]
         self._dot_animation_timer: Any | None = None
 
         self._setup_cleanup_handlers()
-
-    def _resolve_sources_path(self) -> Path:
-        local_sources = getattr(self.args, "local_sources", None) or []
-        if local_sources:
-            first = local_sources[0]
-            host_path = first.get("host_path") or first.get("source_path") or first.get("path")
-            if host_path:
-                return Path(host_path).expanduser().resolve().parent
-        cache_root = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
-        sources = Path(cache_root) / "strix" / "sources" / str(self.args.run_name)
-        sources.mkdir(parents=True, exist_ok=True)
-        return sources
 
     def _build_scan_config(self, args: argparse.Namespace) -> dict[str, Any]:
         return {
@@ -1102,7 +1092,7 @@ class StrixTUIApp(App):  # type: ignore[misc]
 
         return self._merge_renderables(renderables)
 
-    def _get_status_display_content(
+    def _get_status_display_content(  # noqa: PLR0911
         self, agent_id: str, agent_data: dict[str, Any]
     ) -> tuple[Text | None, Text, bool]:
         status = agent_data.get("status", "running")
@@ -1140,6 +1130,16 @@ class StrixTUIApp(App):  # type: ignore[misc]
             keymap = Text()
             keymap.append("Send message to retry", style="dim")
             return (text, keymap, False)
+
+        if status == "failed":
+            error_msg = agent_data.get("error_message", "")
+            text = Text()
+            if error_msg:
+                text.append(error_msg, style="red")
+            else:
+                text.append("Scan failed", style="red")
+            self._stop_dot_animation()
+            return (text, Text(), False)
 
         if status == "waiting":
             keymap = Text()
@@ -1409,13 +1409,12 @@ class StrixTUIApp(App):  # type: ignore[misc]
                 try:
                     if not self._scan_stop_event.is_set():
                         image = load_settings().runtime.image or "strix-sandbox:latest"
-                        sources_path = self._resolve_sources_path()
                         loop.run_until_complete(
                             run_strix_scan(
                                 scan_config=self.scan_config,
                                 scan_id=self.scan_config["run_name"],
                                 image=str(image),
-                                sources_path=sources_path,
+                                local_sources=getattr(self.args, "local_sources", None) or [],
                                 tracer=self.tracer,
                                 bus=self.bus,
                                 interactive=True,
@@ -1424,12 +1423,15 @@ class StrixTUIApp(App):  # type: ignore[misc]
 
                 except (KeyboardInterrupt, asyncio.CancelledError):
                     logger.info("Scan interrupted by user")
-                except (ConnectionError, TimeoutError):
+                except (ConnectionError, TimeoutError) as e:
                     logging.exception("Network error during scan")
-                except RuntimeError:
+                    self._scan_error = e
+                except RuntimeError as e:
                     logging.exception("Runtime error during scan")
-                except Exception:
+                    self._scan_error = e
+                except Exception as e:
                     logging.exception("Unexpected error during scan")
+                    self._scan_error = e
                 finally:
                     # Best-effort sandbox teardown if early setup failed
                     # before run_strix_scan's own ``finally`` ran.
@@ -1995,3 +1997,9 @@ async def run_tui(args: argparse.Namespace) -> None:
     """Run strix in interactive TUI mode with textual."""
     app = StrixTUIApp(args)
     await app.run_async()
+    # Propagate scan-thread failures: ``app.run_async`` returns normally
+    # when the user quits (ctrl-q) regardless of whether the scan
+    # crashed. Without this re-raise, ``main.py`` would treat a failed
+    # scan as success and print the completion banner.
+    if app._scan_error is not None:
+        raise app._scan_error

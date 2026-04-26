@@ -48,6 +48,13 @@ async def _docker_backend(
     NET_RAW caps + ``host.docker.internal`` host-gateway. Imports
     ``docker`` lazily so deployments that target a non-Docker
     backend don't need the docker-py library installed.
+
+    ``session.start()`` is what materializes the manifest entries
+    (LocalDir copies, mount setup, etc.) into the running container —
+    the SDK's ``client.create()`` only builds the inner session object
+    without applying the manifest. ``async with session:`` would call it
+    too, but Strix manages session lifetime explicitly via
+    ``client.delete()`` so we trigger ``start()`` ourselves.
     """
     import docker
     from agents.sandbox.sandboxes.docker import DockerSandboxClientOptions
@@ -57,6 +64,7 @@ async def _docker_backend(
     client = StrixDockerSandboxClient(docker.from_env())
     options = DockerSandboxClientOptions(image=image, exposed_ports=exposed_ports)
     session = await client.create(options=options, manifest=manifest)
+    await session.start()
     return client, session
 
 
