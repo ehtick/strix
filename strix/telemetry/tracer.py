@@ -249,13 +249,19 @@ class Tracer:
             final_scan_result=self.final_scan_result,
         )
 
-    def log_tool_start(self, agent_id: str, tool_name: str) -> int:
+    def log_tool_start(
+        self,
+        agent_id: str,
+        tool_name: str,
+        args: dict[str, Any] | None = None,
+    ) -> int:
         """Record a tool invocation in flight. Returns an exec_id."""
         exec_id = self._next_exec_id
         self._next_exec_id += 1
         self.tool_executions[exec_id] = {
             "agent_id": agent_id,
             "tool_name": tool_name,
+            "args": args or {},
             "status": "running",
             "result": None,
             "timestamp": datetime.now(UTC).isoformat(),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime
 from typing import Any
@@ -9,6 +10,7 @@ from typing import Any
 from agents.items import ModelResponse
 from agents.lifecycle import RunHooks
 from agents.run_context import AgentHookContext, RunContextWrapper
+from agents.tool_context import ToolContext
 
 
 logger = logging.getLogger(__name__)
@@ -219,8 +221,27 @@ class StrixOrchestrationHooks(RunHooks[Any]):
             if not isinstance(ctx, dict):
                 return
             tracer = ctx.get("tracer")
-            if tracer is not None:
-                tracer.log_tool_start(ctx.get("agent_id", "?"), tool.name)
+            if tracer is None:
+                return
+            # ``context`` is a ``ToolContext`` for function-tool calls (per the
+            # SDK ``RunHooks.on_tool_start`` docstring) — that's where the
+            # per-call args live. ``tool_input`` is the parsed dict when the
+            # SDK has it; otherwise parse ``tool_arguments`` (raw JSON).
+            args: dict[str, Any] = {}
+            if isinstance(context, ToolContext):
+                tool_input = context.tool_input
+                if isinstance(tool_input, dict):
+                    args = tool_input
+                else:
+                    raw = context.tool_arguments
+                    if raw:
+                        try:
+                            parsed = json.loads(raw)
+                        except (ValueError, TypeError):
+                            parsed = None
+                        if isinstance(parsed, dict):
+                            args = parsed
+            tracer.log_tool_start(ctx.get("agent_id", "?"), tool.name, args)
         except Exception:
             logger.exception("on_tool_start failed")
 
