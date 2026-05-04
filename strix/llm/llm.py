@@ -26,8 +26,10 @@ from strix.utils.resource_paths import get_strix_resource_path
 litellm.drop_params = True
 litellm.modify_params = True
 
-_THINKING_BLOCK_RE = re.compile(r"<thinking[^>]*>.*?</thinking>", re.DOTALL)
-_THINKING_BLOCK_OR_OPEN_RE = re.compile(r"<thinking[^>]*>.*?(?:</thinking>|\Z)", re.DOTALL)
+_THINKING_BLOCK_RE = re.compile(r"<think(?:ing)?[^>]*>.*?</think(?:ing)?>", re.DOTALL)
+_THINKING_BLOCK_OR_OPEN_RE = re.compile(
+    r"<think(?:ing)?[^>]*>.*?(?:</think(?:ing)?>|\Z)", re.DOTALL
+)
 
 
 def _find_end_tag_outside_thinking(content: str, end_tag: str) -> int:
