@@ -43,7 +43,7 @@ class RuntimeSettings(BaseSettings):
     model_config = _BASE_CONFIG
 
     image: str = Field(
-        default="ghcr.io/usestrix/strix-sandbox:0.2.0",
+        default="ghcr.io/usestrix/strix-sandbox:1.0.0",
         alias="STRIX_IMAGE",
     )
     backend: str = Field(default="docker", alias="STRIX_RUNTIME_BACKEND")
